@@ -1,0 +1,14 @@
+[window]
+width = 1600
+height = 900
+title = "MetaDemo"
+vsync = true
+
+[renderer]
+validation = true
+preferred_device = ""
+frames_in_flight = 2
+clear_color = [0.02, 0.03, 0.05, 1.0]
+
+[scene]
+path = ""
