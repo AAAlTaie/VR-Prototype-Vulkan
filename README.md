@@ -6,7 +6,7 @@ Real-time 3D Gaussian splat renderer in C++20 and Vulkan 1.3, with single-pass s
 
 Vulkan 1.3 device, swapchain, and a presenting frame loop that clears to a configured colour and survives resize. No geometry, no shaders, no allocations yet.
 
-## Content
+## Deliverables
 
 | Component | Files | Responsibility |
 |---|---|---|
