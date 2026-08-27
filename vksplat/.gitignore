@@ -1,0 +1,5 @@
+build/
+assets/
+.vs/
+.cache/
+compile_commands.json
