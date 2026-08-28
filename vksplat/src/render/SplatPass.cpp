@@ -10,7 +10,7 @@
 namespace render {
 namespace {
 
-constexpr uint32_t kProjectionWorkgroupSize = 256;
+constexpr uint32_t kWorkgroupSize = 256;
 constexpr size_t kProjectedEntrySize = 48;
 constexpr uint32_t kHistogramBuckets = 65536;
 
@@ -33,12 +33,11 @@ void globalBarrier(VkCommandBuffer commandBuffer, VkPipelineStageFlags2 sourceSt
 
 void computeToCompute(VkCommandBuffer commandBuffer) {
     globalBarrier(commandBuffer, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                  VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                  VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+                  VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
+                  VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT |
+                      VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
 }
-
-core::Result<VkPipeline> createComputePipeline(VkDevice device, VkPipelineLayout layout,
-                                               const std::filesystem::path& shader);
 
 core::Result<VkShaderModule> createModule(VkDevice device, const std::filesystem::path& relative) {
     auto resolved = platform::resolveResource(relative);
@@ -72,7 +71,8 @@ core::Result<VkShaderModule> createModule(VkDevice device, const std::filesystem
     return module;
 }
 
-core::Result<VkPipelineLayout> createLayout(VkDevice device, VkShaderStageFlags stages, uint32_t size) {
+core::Result<UniquePipelineLayout> createLayout(VkDevice device, VkShaderStageFlags stages,
+                                                uint32_t size) {
     VkPushConstantRange range{};
     range.stageFlags = stages;
     range.size = size;
@@ -86,11 +86,11 @@ core::Result<VkPipelineLayout> createLayout(VkDevice device, VkShaderStageFlags 
     if (vkCreatePipelineLayout(device, &info, nullptr, &layout) != VK_SUCCESS) {
         return core::Error{"vkCreatePipelineLayout failed"};
     }
-    return layout;
+    return UniquePipelineLayout(device, layout);
 }
 
-core::Result<VkPipeline> createComputePipeline(VkDevice device, VkPipelineLayout layout,
-                                               const std::filesystem::path& shader) {
+core::Result<UniquePipeline> buildComputePipeline(VkDevice device, VkPipelineLayout layout,
+                                                  const std::filesystem::path& shader) {
     auto module = createModule(device, shader);
     if (!module) {
         return core::Error{module.error()};
@@ -111,53 +111,51 @@ core::Result<VkPipeline> createComputePipeline(VkDevice device, VkPipelineLayout
     if (created != VK_SUCCESS) {
         return core::Error{"vkCreateComputePipelines failed for " + shader.string()};
     }
-    return pipeline;
+    return UniquePipeline(device, pipeline);
 }
 
 }
 
 core::Result<SplatPass> SplatPass::create(const VulkanContext& context, VkFormat colourFormat,
-                                          uint32_t splatCount) {
+                                          uint32_t splatCount, uint32_t viewCount) {
     SplatPass pass;
     pass.device_ = context.device();
+    pass.viewCount_ = viewCount;
+
+    struct StageSpec {
+        Stage* target;
+        uint32_t constantSize;
+        const char* shader;
+    };
+
+    const StageSpec specs[]{
+        {&pass.projection_, sizeof(ProjectionConstants), "shaders/project.comp.spv"},
+        {&pass.clear_, sizeof(ClearConstants), "shaders/sort_clear.comp.spv"},
+        {&pass.histogram_, sizeof(HistogramConstants), "shaders/sort_histogram.comp.spv"},
+        {&pass.scan_, sizeof(ScanConstants), "shaders/sort_scan.comp.spv"},
+        {&pass.scatter_, sizeof(ScatterConstants), "shaders/sort_scatter.comp.spv"},
+        {&pass.combine_, sizeof(CombineConstants), "shaders/sort_combine.comp.spv"},
+    };
+
+    for (const StageSpec& spec : specs) {
+        auto layout = createLayout(pass.device_, VK_SHADER_STAGE_COMPUTE_BIT, spec.constantSize);
+        if (!layout) {
+            return core::Error{layout.error()};
+        }
+        spec.target->layout = layout.take();
+
+        auto pipeline = buildComputePipeline(pass.device_, spec.target->layout.get(), spec.shader);
+        if (!pipeline) {
+            return core::Error{pipeline.error()};
+        }
+        spec.target->pipeline = pipeline.take();
+    }
 
     auto rasterLayout = createLayout(pass.device_, VK_SHADER_STAGE_VERTEX_BIT, sizeof(RasterConstants));
     if (!rasterLayout) {
         return core::Error{rasterLayout.error()};
     }
-    pass.rasterLayout_ = rasterLayout.value();
-
-    struct ComputeStage {
-        VkPipelineLayout* layout;
-        VkPipeline* pipeline;
-        uint32_t constantSize;
-        const char* shader;
-    };
-
-    const ComputeStage computeStages[]{
-        {&pass.projectionLayout_, &pass.projectionPipeline_, sizeof(ProjectionConstants),
-         "shaders/project.comp.spv"},
-        {&pass.clearLayout_, &pass.clearPipeline_, sizeof(ClearConstants), "shaders/sort_clear.comp.spv"},
-        {&pass.histogramLayout_, &pass.histogramPipeline_, sizeof(HistogramConstants),
-         "shaders/sort_histogram.comp.spv"},
-        {&pass.scanLayout_, &pass.scanPipeline_, sizeof(ScanConstants), "shaders/sort_scan.comp.spv"},
-        {&pass.scatterLayout_, &pass.scatterPipeline_, sizeof(ScatterConstants),
-         "shaders/sort_scatter.comp.spv"},
-    };
-
-    for (const ComputeStage& stage : computeStages) {
-        auto layout = createLayout(pass.device_, VK_SHADER_STAGE_COMPUTE_BIT, stage.constantSize);
-        if (!layout) {
-            return core::Error{layout.error()};
-        }
-        *stage.layout = layout.value();
-
-        auto pipeline = createComputePipeline(pass.device_, *stage.layout, stage.shader);
-        if (!pipeline) {
-            return core::Error{pipeline.error()};
-        }
-        *stage.pipeline = pipeline.value();
-    }
+    pass.raster_.layout = rasterLayout.take();
 
     auto vertex = createModule(pass.device_, "shaders/splat.vert.spv");
     if (!vertex) {
@@ -226,6 +224,7 @@ core::Result<SplatPass> SplatPass::create(const VulkanContext& context, VkFormat
 
     VkPipelineRenderingCreateInfo rendering{};
     rendering.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+    rendering.viewMask = (1u << viewCount) - 1u;
     rendering.colorAttachmentCount = 1;
     rendering.pColorAttachmentFormats = &colourFormat;
 
@@ -241,46 +240,65 @@ core::Result<SplatPass> SplatPass::create(const VulkanContext& context, VkFormat
     pipelineInfo.pMultisampleState = &multisample;
     pipelineInfo.pColorBlendState = &blend;
     pipelineInfo.pDynamicState = &dynamic;
-    pipelineInfo.layout = pass.rasterLayout_;
+    pipelineInfo.layout = pass.raster_.layout.get();
 
-    const VkResult rasterCreated = vkCreateGraphicsPipelines(pass.device_, VK_NULL_HANDLE, 1, &pipelineInfo,
-                                                             nullptr, &pass.rasterPipeline_);
+    VkPipeline rasterPipeline = VK_NULL_HANDLE;
+    const VkResult created = vkCreateGraphicsPipelines(pass.device_, VK_NULL_HANDLE, 1, &pipelineInfo,
+                                                       nullptr, &rasterPipeline);
     vkDestroyShaderModule(pass.device_, fragment.value(), nullptr);
     vkDestroyShaderModule(pass.device_, vertex.value(), nullptr);
-    if (rasterCreated != VK_SUCCESS) {
+
+    if (created != VK_SUCCESS) {
         return core::Error{"vkCreateGraphicsPipelines failed"};
     }
-
-    auto projected = GpuBuffer::createDeviceLocal(
-        context.allocator(), static_cast<VkDeviceSize>(splatCount) * kProjectedEntrySize,
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
-    if (!projected) {
-        return core::Error{projected.error()};
-    }
-
-    auto arguments = GpuBuffer::createDeviceLocal(
-        context.allocator(), sizeof(VkDrawIndirectCommand),
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
-            VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
-    if (!arguments) {
-        return core::Error{arguments.error()};
-    }
+    pass.raster_.pipeline = UniquePipeline(pass.device_, rasterPipeline);
 
     const VkBufferUsageFlags storageUsage =
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    const VkDeviceSize indexBytes = static_cast<VkDeviceSize>(splatCount) * sizeof(uint32_t);
 
-    auto keys = GpuBuffer::createDeviceLocal(context.allocator(),
-                                             static_cast<VkDeviceSize>(splatCount) * sizeof(uint32_t),
-                                             storageUsage);
-    if (!keys) {
-        return core::Error{keys.error()};
+    for (uint32_t index = 0; index < viewCount; ++index) {
+        EyeResources& eye = pass.eyes_[index];
+
+        auto projected = GpuBuffer::createDeviceLocal(
+            context.allocator(), static_cast<VkDeviceSize>(splatCount) * kProjectedEntrySize,
+            storageUsage);
+        if (!projected) {
+            return core::Error{projected.error()};
+        }
+
+        auto keys = GpuBuffer::createDeviceLocal(context.allocator(), indexBytes, storageUsage);
+        if (!keys) {
+            return core::Error{keys.error()};
+        }
+
+        auto sorted = GpuBuffer::createDeviceLocal(context.allocator(), indexBytes, storageUsage);
+        if (!sorted) {
+            return core::Error{sorted.error()};
+        }
+
+        auto arguments = GpuBuffer::createDeviceLocal(
+            context.allocator(), sizeof(VkDrawIndirectCommand),
+            storageUsage | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+        if (!arguments) {
+            return core::Error{arguments.error()};
+        }
+
+        eye.projected = projected.take();
+        eye.keys = keys.take();
+        eye.sorted = sorted.take();
+        eye.drawArguments = arguments.take();
+        eye.projectedAddress = eye.projected.deviceAddress(pass.device_);
+        eye.keysAddress = eye.keys.deviceAddress(pass.device_);
+        eye.sortedAddress = eye.sorted.deviceAddress(pass.device_);
+        eye.drawAddress = eye.drawArguments.deviceAddress(pass.device_);
     }
 
-    auto sorted = GpuBuffer::createDeviceLocal(context.allocator(),
-                                               static_cast<VkDeviceSize>(splatCount) * sizeof(uint32_t),
-                                               storageUsage);
-    if (!sorted) {
-        return core::Error{sorted.error()};
+    auto combined = GpuBuffer::createDeviceLocal(
+        context.allocator(), sizeof(VkDrawIndirectCommand),
+        storageUsage | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+    if (!combined) {
+        return core::Error{combined.error()};
     }
 
     auto histogram = GpuBuffer::createDeviceLocal(
@@ -302,103 +320,69 @@ core::Result<SplatPass> SplatPass::create(const VulkanContext& context, VkFormat
         return core::Error{statistics.error()};
     }
 
-    pass.statistics_ = statistics.take();
-    pass.projected_ = projected.take();
-    pass.drawArguments_ = arguments.take();
-    pass.keys_ = keys.take();
-    pass.sorted_ = sorted.take();
-    pass.histogram_ = histogram.take();
+    pass.combinedArguments_ = combined.take();
+    pass.histogramBuffer_ = histogram.take();
     pass.dispatchArguments_ = dispatchArguments.take();
-
-    pass.projectedAddress_ = pass.projected_.deviceAddress(pass.device_);
-    pass.drawAddress_ = pass.drawArguments_.deviceAddress(pass.device_);
-    pass.keysAddress_ = pass.keys_.deviceAddress(pass.device_);
-    pass.sortedAddress_ = pass.sorted_.deviceAddress(pass.device_);
-    pass.histogramAddress_ = pass.histogram_.deviceAddress(pass.device_);
+    pass.statistics_ = statistics.take();
+    pass.combinedAddress_ = pass.combinedArguments_.deviceAddress(pass.device_);
+    pass.histogramAddress_ = pass.histogramBuffer_.deviceAddress(pass.device_);
     pass.dispatchAddress_ = pass.dispatchArguments_.deviceAddress(pass.device_);
 
     return core::Result<SplatPass>(std::move(pass));
 }
 
-void SplatPass::recordProjection(VkCommandBuffer commandBuffer, const glm::mat4& view, glm::vec2 focal,
-                                 glm::vec2 viewport, VkDeviceAddress splats, uint32_t splatCount,
-                                 float depthMinimum, float depthMaximum) const {
+void SplatPass::recordProjection(VkCommandBuffer commandBuffer, const EyeResources& eye,
+                                 const glm::mat4& view, glm::vec2 focal, glm::vec2 viewport,
+                                 VkDeviceAddress splats, uint32_t splatCount, float depthMinimum,
+                                 float depthMaximum) const {
     const VkDrawIndirectCommand reset{4, 0, 0, 0};
-    vkCmdUpdateBuffer(commandBuffer, drawArguments_.handle(), 0, sizeof(reset), &reset);
+    vkCmdUpdateBuffer(commandBuffer, eye.drawArguments.handle(), 0, sizeof(reset), &reset);
 
-    VkMemoryBarrier2 toCompute{};
-    toCompute.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
-    toCompute.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
-    toCompute.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-    toCompute.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-    toCompute.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
-
-    VkDependencyInfo firstDependency{};
-    firstDependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-    firstDependency.memoryBarrierCount = 1;
-    firstDependency.pMemoryBarriers = &toCompute;
-    vkCmdPipelineBarrier2(commandBuffer, &firstDependency);
+    globalBarrier(commandBuffer, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                  VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
 
     ProjectionConstants constants{};
     constants.view = view;
     constants.focal = focal;
     constants.viewport = viewport;
     constants.splats = splats;
-    constants.projected = projectedAddress_;
-    constants.draw = drawAddress_;
-    constants.keys = keysAddress_;
+    constants.projected = eye.projectedAddress;
+    constants.draw = eye.drawAddress;
+    constants.keys = eye.keysAddress;
     constants.splatCount = splatCount;
     constants.depthMinimum = depthMinimum;
     constants.depthMaximum = depthMaximum;
 
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, projectionPipeline_);
-    vkCmdPushConstants(commandBuffer, projectionLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, projection_.pipeline.get());
+    vkCmdPushConstants(commandBuffer, projection_.layout.get(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
                        sizeof(constants), &constants);
-    vkCmdDispatch(commandBuffer, (splatCount + kProjectionWorkgroupSize - 1) / kProjectionWorkgroupSize, 1,
-                  1);
+    vkCmdDispatch(commandBuffer, (splatCount + kWorkgroupSize - 1) / kWorkgroupSize, 1, 1);
 
-    VkMemoryBarrier2 toDraw{};
-    toDraw.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
-    toDraw.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-    toDraw.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
-    toDraw.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_COPY_BIT;
-    toDraw.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_TRANSFER_READ_BIT;
-
-    VkDependencyInfo secondDependency{};
-    secondDependency.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-    secondDependency.memoryBarrierCount = 1;
-    secondDependency.pMemoryBarriers = &toDraw;
-    vkCmdPipelineBarrier2(commandBuffer, &secondDependency);
-
-    VkBufferCopy region{};
-    region.size = sizeof(VkDrawIndirectCommand);
-    vkCmdCopyBuffer(commandBuffer, drawArguments_.handle(), statistics_.handle(), 1, &region);
+    computeToCompute(commandBuffer);
 }
 
-void SplatPass::recordSort(VkCommandBuffer commandBuffer) const {
+void SplatPass::recordSort(VkCommandBuffer commandBuffer, const EyeResources& eye) const {
     ClearConstants clear{};
     clear.histogram = histogramAddress_;
-    clear.draw = drawAddress_;
+    clear.draw = eye.drawAddress;
     clear.dispatch = dispatchAddress_;
 
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, clearPipeline_);
-    vkCmdPushConstants(commandBuffer, clearLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(clear), &clear);
-    vkCmdDispatch(commandBuffer, kHistogramBuckets / 256, 1, 1);
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, clear_.pipeline.get());
+    vkCmdPushConstants(commandBuffer, clear_.layout.get(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(clear),
+                       &clear);
+    vkCmdDispatch(commandBuffer, kHistogramBuckets / kWorkgroupSize, 1, 1);
 
-    globalBarrier(commandBuffer, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                  VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
-                  VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT |
-                      VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT);
+    computeToCompute(commandBuffer);
 
     HistogramConstants histogram{};
-    histogram.keys = keysAddress_;
+    histogram.keys = eye.keysAddress;
     histogram.histogram = histogramAddress_;
-    histogram.draw = drawAddress_;
+    histogram.draw = eye.drawAddress;
 
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, histogramPipeline_);
-    vkCmdPushConstants(commandBuffer, histogramLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(histogram),
-                       &histogram);
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, histogram_.pipeline.get());
+    vkCmdPushConstants(commandBuffer, histogram_.layout.get(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                       sizeof(histogram), &histogram);
     vkCmdDispatchIndirect(commandBuffer, dispatchArguments_.handle(), 0);
 
     computeToCompute(commandBuffer);
@@ -406,37 +390,58 @@ void SplatPass::recordSort(VkCommandBuffer commandBuffer) const {
     ScanConstants scan{};
     scan.histogram = histogramAddress_;
 
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, scanPipeline_);
-    vkCmdPushConstants(commandBuffer, scanLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(scan), &scan);
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, scan_.pipeline.get());
+    vkCmdPushConstants(commandBuffer, scan_.layout.get(), VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(scan),
+                       &scan);
     vkCmdDispatch(commandBuffer, 1, 1, 1);
 
     computeToCompute(commandBuffer);
 
     ScatterConstants scatter{};
-    scatter.keys = keysAddress_;
+    scatter.keys = eye.keysAddress;
     scatter.histogram = histogramAddress_;
-    scatter.sorted = sortedAddress_;
-    scatter.draw = drawAddress_;
+    scatter.sorted = eye.sortedAddress;
+    scatter.draw = eye.drawAddress;
 
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, scatterPipeline_);
-    vkCmdPushConstants(commandBuffer, scatterLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(scatter),
-                       &scatter);
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, scatter_.pipeline.get());
+    vkCmdPushConstants(commandBuffer, scatter_.layout.get(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                       sizeof(scatter), &scatter);
     vkCmdDispatchIndirect(commandBuffer, dispatchArguments_.handle(), 0);
+
+    computeToCompute(commandBuffer);
+}
+
+void SplatPass::recordEye(VkCommandBuffer commandBuffer, uint32_t eye, const glm::mat4& view,
+                          glm::vec2 focal, glm::vec2 viewport, VkDeviceAddress splats,
+                          uint32_t splatCount, float depthMinimum, float depthMaximum) const {
+    const EyeResources& resources = eyes_[eye];
+    recordProjection(commandBuffer, resources, view, focal, viewport, splats, splatCount, depthMinimum,
+                     depthMaximum);
+    recordSort(commandBuffer, resources);
+}
+
+void SplatPass::recordCombine(VkCommandBuffer commandBuffer) const {
+    CombineConstants constants{};
+    constants.left = eyes_[0].drawAddress;
+    constants.right = eyes_[viewCount_ > 1 ? 1 : 0].drawAddress;
+    constants.combined = combinedAddress_;
+    constants.viewCount = viewCount_;
+
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, combine_.pipeline.get());
+    vkCmdPushConstants(commandBuffer, combine_.layout.get(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                       sizeof(constants), &constants);
+    vkCmdDispatch(commandBuffer, 1, 1, 1);
 
     globalBarrier(commandBuffer, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                   VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-                  VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
-                  VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
-}
+                  VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT |
+                      VK_PIPELINE_STAGE_2_COPY_BIT,
+                  VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                      VK_ACCESS_2_TRANSFER_READ_BIT);
 
-uint32_t SplatPass::visibleSplats() const {
-    const void* mapped = statistics_.mappedData();
-    if (mapped == nullptr) {
-        return 0;
-    }
-    VkDrawIndirectCommand command{};
-    std::memcpy(&command, mapped, sizeof(command));
-    return command.instanceCount;
+    VkBufferCopy region{};
+    region.size = sizeof(VkDrawIndirectCommand);
+    vkCmdCopyBuffer(commandBuffer, combinedArguments_.handle(), statistics_.handle(), 1, &region);
 }
 
 void SplatPass::recordRaster(VkCommandBuffer commandBuffer, VkExtent2D extent) const {
@@ -450,108 +455,29 @@ void SplatPass::recordRaster(VkCommandBuffer commandBuffer, VkExtent2D extent) c
 
     RasterConstants constants{};
     constants.viewport = {static_cast<float>(extent.width), static_cast<float>(extent.height)};
-    constants.projected = projectedAddress_;
-    constants.sorted = sortedAddress_;
+    for (uint32_t index = 0; index < kMaxViews; ++index) {
+        const EyeResources& eye = eyes_[index < viewCount_ ? index : 0];
+        constants.projected[index] = eye.projectedAddress;
+        constants.sorted[index] = eye.sortedAddress;
+        constants.counts[index] = eye.drawAddress;
+    }
 
     vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, rasterPipeline_);
-    vkCmdPushConstants(commandBuffer, rasterLayout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(constants),
-                       &constants);
-    vkCmdDrawIndirect(commandBuffer, drawArguments_.handle(), 0, 1, sizeof(VkDrawIndirectCommand));
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, raster_.pipeline.get());
+    vkCmdPushConstants(commandBuffer, raster_.layout.get(), VK_SHADER_STAGE_VERTEX_BIT, 0,
+                       sizeof(constants), &constants);
+    vkCmdDrawIndirect(commandBuffer, combinedArguments_.handle(), 0, 1, sizeof(VkDrawIndirectCommand));
 }
 
-SplatPass::SplatPass(SplatPass&& other) noexcept
-    : device_(std::exchange(other.device_, VK_NULL_HANDLE)),
-      projectionLayout_(std::exchange(other.projectionLayout_, VK_NULL_HANDLE)),
-      projectionPipeline_(std::exchange(other.projectionPipeline_, VK_NULL_HANDLE)),
-      clearLayout_(std::exchange(other.clearLayout_, VK_NULL_HANDLE)),
-      clearPipeline_(std::exchange(other.clearPipeline_, VK_NULL_HANDLE)),
-      histogramLayout_(std::exchange(other.histogramLayout_, VK_NULL_HANDLE)),
-      histogramPipeline_(std::exchange(other.histogramPipeline_, VK_NULL_HANDLE)),
-      scanLayout_(std::exchange(other.scanLayout_, VK_NULL_HANDLE)),
-      scanPipeline_(std::exchange(other.scanPipeline_, VK_NULL_HANDLE)),
-      scatterLayout_(std::exchange(other.scatterLayout_, VK_NULL_HANDLE)),
-      scatterPipeline_(std::exchange(other.scatterPipeline_, VK_NULL_HANDLE)),
-      rasterLayout_(std::exchange(other.rasterLayout_, VK_NULL_HANDLE)),
-      rasterPipeline_(std::exchange(other.rasterPipeline_, VK_NULL_HANDLE)),
-      projected_(std::move(other.projected_)),
-      drawArguments_(std::move(other.drawArguments_)),
-      statistics_(std::move(other.statistics_)),
-      keys_(std::move(other.keys_)),
-      sorted_(std::move(other.sorted_)),
-      histogram_(std::move(other.histogram_)),
-      dispatchArguments_(std::move(other.dispatchArguments_)),
-      keysAddress_(std::exchange(other.keysAddress_, 0)),
-      sortedAddress_(std::exchange(other.sortedAddress_, 0)),
-      histogramAddress_(std::exchange(other.histogramAddress_, 0)),
-      dispatchAddress_(std::exchange(other.dispatchAddress_, 0)),
-      projectedAddress_(std::exchange(other.projectedAddress_, 0)),
-      drawAddress_(std::exchange(other.drawAddress_, 0)) {}
-
-SplatPass& SplatPass::operator=(SplatPass&& other) noexcept {
-    if (this != &other) {
-        destroy();
-        device_ = std::exchange(other.device_, VK_NULL_HANDLE);
-        projectionLayout_ = std::exchange(other.projectionLayout_, VK_NULL_HANDLE);
-        projectionPipeline_ = std::exchange(other.projectionPipeline_, VK_NULL_HANDLE);
-        clearLayout_ = std::exchange(other.clearLayout_, VK_NULL_HANDLE);
-        clearPipeline_ = std::exchange(other.clearPipeline_, VK_NULL_HANDLE);
-        histogramLayout_ = std::exchange(other.histogramLayout_, VK_NULL_HANDLE);
-        histogramPipeline_ = std::exchange(other.histogramPipeline_, VK_NULL_HANDLE);
-        scanLayout_ = std::exchange(other.scanLayout_, VK_NULL_HANDLE);
-        scanPipeline_ = std::exchange(other.scanPipeline_, VK_NULL_HANDLE);
-        scatterLayout_ = std::exchange(other.scatterLayout_, VK_NULL_HANDLE);
-        scatterPipeline_ = std::exchange(other.scatterPipeline_, VK_NULL_HANDLE);
-        rasterLayout_ = std::exchange(other.rasterLayout_, VK_NULL_HANDLE);
-        rasterPipeline_ = std::exchange(other.rasterPipeline_, VK_NULL_HANDLE);
-        projected_ = std::move(other.projected_);
-        drawArguments_ = std::move(other.drawArguments_);
-        statistics_ = std::move(other.statistics_);
-        keys_ = std::move(other.keys_);
-        sorted_ = std::move(other.sorted_);
-        histogram_ = std::move(other.histogram_);
-        dispatchArguments_ = std::move(other.dispatchArguments_);
-        keysAddress_ = std::exchange(other.keysAddress_, 0);
-        sortedAddress_ = std::exchange(other.sortedAddress_, 0);
-        histogramAddress_ = std::exchange(other.histogramAddress_, 0);
-        dispatchAddress_ = std::exchange(other.dispatchAddress_, 0);
-        projectedAddress_ = std::exchange(other.projectedAddress_, 0);
-        drawAddress_ = std::exchange(other.drawAddress_, 0);
+uint32_t SplatPass::visibleSplats() const {
+    const void* mapped = statistics_.mappedData();
+    if (mapped == nullptr) {
+        return 0;
     }
-    return *this;
-}
-
-SplatPass::~SplatPass() {
-    destroy();
-}
-
-void SplatPass::destroy() {
-    if (device_ == VK_NULL_HANDLE) {
-        return;
-    }
-    if (rasterPipeline_ != VK_NULL_HANDLE) {
-        vkDestroyPipeline(device_, rasterPipeline_, nullptr);
-    }
-    if (rasterLayout_ != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(device_, rasterLayout_, nullptr);
-    }
-    const VkPipeline pipelines[]{projectionPipeline_, clearPipeline_, histogramPipeline_, scanPipeline_,
-                                 scatterPipeline_};
-    for (VkPipeline pipeline : pipelines) {
-        if (pipeline != VK_NULL_HANDLE) {
-            vkDestroyPipeline(device_, pipeline, nullptr);
-        }
-    }
-
-    const VkPipelineLayout layouts[]{projectionLayout_, clearLayout_, histogramLayout_, scanLayout_,
-                                     scatterLayout_};
-    for (VkPipelineLayout layout : layouts) {
-        if (layout != VK_NULL_HANDLE) {
-            vkDestroyPipelineLayout(device_, layout, nullptr);
-        }
-    }
-    device_ = VK_NULL_HANDLE;
+    VkDrawIndirectCommand command{};
+    std::memcpy(&command, mapped, sizeof(command));
+    return command.instanceCount;
 }
 
 }

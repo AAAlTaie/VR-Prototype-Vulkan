@@ -1,0 +1,25 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+#include "splat_common.glsl"
+
+layout(local_size_x = 1) in;
+
+layout(push_constant) uniform Constants {
+    DrawArguments left;
+    DrawArguments right;
+    DrawArguments combined;
+    uint viewCount;
+} constants;
+
+void main() {
+    uint count = constants.left.instanceCount;
+    if (constants.viewCount > 1u) {
+        count = max(count, constants.right.instanceCount);
+    }
+
+    constants.combined.vertexCount = 4u;
+    constants.combined.instanceCount = count;
+    constants.combined.firstVertex = 0u;
+    constants.combined.firstInstance = 0u;
+}

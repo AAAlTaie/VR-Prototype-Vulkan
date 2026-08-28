@@ -24,6 +24,11 @@ struct RendererConfig {
     bool logStatistics;
 };
 
+struct StereoConfig {
+    bool enabled;
+    float interpupillaryDistance;
+};
+
 struct TonemapConfig {
     float exposure;
     uint32_t operatorIndex;
@@ -45,6 +50,7 @@ struct SceneConfig {
 struct Config {
     WindowConfig window;
     RendererConfig renderer;
+    StereoConfig stereo;
     TonemapConfig tonemap;
     CameraConfig camera;
     SceneConfig scene;

@@ -55,6 +55,10 @@ core::Result<VulkanContext> VulkanContext::create(const platform::Window& window
     features13.synchronization2 = VK_TRUE;
     features13.shaderDemoteToHelperInvocation = VK_TRUE;
 
+    VkPhysicalDeviceVulkan11Features features11{};
+    features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+    features11.multiview = VK_TRUE;
+
     VkPhysicalDeviceVulkan12Features features12{};
     features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     features12.bufferDeviceAddress = VK_TRUE;
@@ -68,6 +72,7 @@ core::Result<VulkanContext> VulkanContext::create(const platform::Window& window
     selector.set_minimum_version(1, 3)
         .set_required_features_13(features13)
         .set_required_features_12(features12)
+        .set_required_features_11(features11)
         .set_required_features(features);
     if (!config.preferredDevice.empty()) {
         selector.set_name(config.preferredDevice);

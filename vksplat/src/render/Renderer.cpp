@@ -5,7 +5,8 @@
 namespace render {
 namespace {
 
-VkImageMemoryBarrier2 makeLayoutBarrier(VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout,
+VkImageMemoryBarrier2 makeLayoutBarrier(VkImage image, uint32_t layers, VkImageLayout oldLayout,
+                                        VkImageLayout newLayout,
                                         VkPipelineStageFlags2 sourceStage, VkAccessFlags2 sourceAccess,
                                         VkPipelineStageFlags2 destinationStage,
                                         VkAccessFlags2 destinationAccess) {
@@ -20,7 +21,7 @@ VkImageMemoryBarrier2 makeLayoutBarrier(VkImage image, VkImageLayout oldLayout, 
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = image;
-    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, layers};
     return barrier;
 }
 
@@ -33,7 +34,7 @@ void submitBarrier(VkCommandBuffer commandBuffer, const VkImageMemoryBarrier2& b
 }
 
 void beginColourPass(VkCommandBuffer commandBuffer, VkImageView view, VkExtent2D extent,
-                     const std::array<float, 4>& color) {
+                     const std::array<float, 4>& color, uint32_t viewMask) {
     VkRenderingAttachmentInfo attachment{};
     attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
     attachment.imageView = view;
@@ -46,6 +47,7 @@ void beginColourPass(VkCommandBuffer commandBuffer, VkImageView view, VkExtent2D
     rendering.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
     rendering.renderArea = {{0, 0}, extent};
     rendering.layerCount = 1;
+    rendering.viewMask = viewMask;
     rendering.colorAttachmentCount = 1;
     rendering.pColorAttachments = &attachment;
 
@@ -54,8 +56,10 @@ void beginColourPass(VkCommandBuffer commandBuffer, VkImageView view, VkExtent2D
 
 }
 
-core::Result<Renderer> Renderer::create(const VulkanContext& context, uint32_t framesInFlight) {
+core::Result<Renderer> Renderer::create(const VulkanContext& context, uint32_t framesInFlight,
+                                       uint32_t viewCount) {
     Renderer renderer;
+    renderer.viewCount_ = viewCount;
     renderer.device_ = context.device();
     renderer.queue_ = context.graphicsQueue();
     renderer.frames_.resize(framesInFlight);
@@ -100,8 +104,9 @@ core::Result<Renderer> Renderer::create(const VulkanContext& context, uint32_t f
 core::Result<bool> Renderer::bindSwapchain(const VulkanContext& context, const Swapchain& swapchain) {
     releasePresentSemaphores();
 
-    auto target = GpuImage::createColourTarget(context.allocator(), device_, kHdrFormat,
-                                               swapchain.extent());
+    hdrExtent_ = {swapchain.extent().width / viewCount_, swapchain.extent().height};
+    auto target = GpuImage::createColourTarget(context.allocator(), device_, kHdrFormat, hdrExtent_,
+                                               viewCount_);
     if (!target) {
         return core::Error{target.error()};
     }
@@ -154,20 +159,22 @@ core::Result<FrameStatus> Renderer::drawFrame(const Swapchain& swapchain,
     }
 
     submitBarrier(frame.commandBuffer,
-                  makeLayoutBarrier(hdrTarget_.handle(), VK_IMAGE_LAYOUT_UNDEFINED,
+                  makeLayoutBarrier(hdrTarget_.handle(), viewCount_, VK_IMAGE_LAYOUT_UNDEFINED,
                                     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                                     VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
                                     VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                                     VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT));
 
-    beginColourPass(frame.commandBuffer, hdrTarget_.view(), extent, clearColor);
+    beginColourPass(frame.commandBuffer, hdrTarget_.view(), hdrExtent_, clearColor,
+                    (1u << viewCount_) - 1u);
     if (scenePass) {
-        scenePass(frame.commandBuffer, extent);
+        scenePass(frame.commandBuffer, hdrExtent_);
     }
     vkCmdEndRendering(frame.commandBuffer);
 
     submitBarrier(frame.commandBuffer,
-                  makeLayoutBarrier(hdrTarget_.handle(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                  makeLayoutBarrier(hdrTarget_.handle(), viewCount_,
+                                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                                     VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                                     VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
@@ -175,20 +182,21 @@ core::Result<FrameStatus> Renderer::drawFrame(const Swapchain& swapchain,
                                     VK_ACCESS_2_SHADER_SAMPLED_READ_BIT));
 
     submitBarrier(frame.commandBuffer,
-                  makeLayoutBarrier(swapchain.image(imageIndex), VK_IMAGE_LAYOUT_UNDEFINED,
+                  makeLayoutBarrier(swapchain.image(imageIndex), 1, VK_IMAGE_LAYOUT_UNDEFINED,
                                     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                                     VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
                                     VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                                     VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT));
 
-    beginColourPass(frame.commandBuffer, swapchain.imageView(imageIndex), extent, clearColor);
+    beginColourPass(frame.commandBuffer, swapchain.imageView(imageIndex), extent, clearColor, 0);
     if (compositePass) {
         compositePass(frame.commandBuffer, extent);
     }
     vkCmdEndRendering(frame.commandBuffer);
 
     submitBarrier(frame.commandBuffer,
-                  makeLayoutBarrier(swapchain.image(imageIndex), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                  makeLayoutBarrier(swapchain.image(imageIndex), 1,
+                                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                                     VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                                     VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                                     VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
@@ -257,6 +265,8 @@ Renderer::Renderer(Renderer&& other) noexcept
       frames_(std::move(other.frames_)),
       presentReady_(std::move(other.presentReady_)),
       hdrTarget_(std::move(other.hdrTarget_)),
+      hdrExtent_(other.hdrExtent_),
+      viewCount_(other.viewCount_),
       frameIndex_(other.frameIndex_) {
     other.frames_.clear();
     other.presentReady_.clear();
@@ -270,6 +280,8 @@ Renderer& Renderer::operator=(Renderer&& other) noexcept {
         frames_ = std::move(other.frames_);
         presentReady_ = std::move(other.presentReady_);
         hdrTarget_ = std::move(other.hdrTarget_);
+        hdrExtent_ = other.hdrExtent_;
+        viewCount_ = other.viewCount_;
         frameIndex_ = other.frameIndex_;
         other.frames_.clear();
         other.presentReady_.clear();

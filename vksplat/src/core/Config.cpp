@@ -108,6 +108,15 @@ RendererConfig parseRenderer(const toml::table& root) {
     };
 }
 
+StereoConfig parseStereo(const toml::table& root) {
+    const toml::table& table = requireSection(root, "stereo");
+    requireOnlyKeys(table, "[stereo]", {"enabled", "interpupillary_distance"});
+    return {
+        requireField<bool>(table, "[stereo]", "enabled"),
+        requireFloat(table, "[stereo]", "interpupillary_distance", 0.0f, 0.5f),
+    };
+}
+
 TonemapConfig parseTonemap(const toml::table& root) {
     const toml::table& table = requireSection(root, "tonemap");
     requireOnlyKeys(table, "[tonemap]", {"exposure", "operator"});
@@ -153,9 +162,9 @@ SceneConfig parseScene(const toml::table& root) {
 Result<Config> loadConfig(const std::filesystem::path& file) {
     try {
         const toml::table root = toml::parse_file(file.string());
-        requireOnlyKeys(root, "root", {"window", "renderer", "tonemap", "camera", "scene"});
-        return Config{parseWindow(root), parseRenderer(root), parseTonemap(root), parseCamera(root),
-                      parseScene(root)};
+        requireOnlyKeys(root, "root", {"window", "renderer", "stereo", "tonemap", "camera", "scene"});
+        return Config{parseWindow(root), parseRenderer(root), parseStereo(root), parseTonemap(root),
+                      parseCamera(root), parseScene(root)};
     } catch (const toml::parse_error& error) {
         return Error{file.string() + ": " + std::string(error.description())};
     } catch (const SchemaError& error) {

@@ -21,4 +21,13 @@ glm::mat4 OrbitCamera::view() const {
     return glm::lookAt(target_ + offset * distance_, target_, glm::vec3{0.0f, 1.0f, 0.0f});
 }
 
+glm::mat4 OrbitCamera::eyeView(uint32_t eye, uint32_t viewCount, float interpupillaryDistance) const {
+    if (viewCount < 2) {
+        return view();
+    }
+
+    const float offset = (eye == 0 ? -0.5f : 0.5f) * interpupillaryDistance;
+    return glm::translate(glm::mat4(1.0f), glm::vec3{-offset, 0.0f, 0.0f}) * view();
+}
+
 }

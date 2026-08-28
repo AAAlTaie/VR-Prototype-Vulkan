@@ -17,7 +17,8 @@ enum class FrameStatus { Presented, SwapchainOutOfDate };
 
 class Renderer {
 public:
-    static core::Result<Renderer> create(const VulkanContext& context, uint32_t framesInFlight);
+    static core::Result<Renderer> create(const VulkanContext& context, uint32_t framesInFlight,
+                                        uint32_t viewCount);
 
     Renderer(Renderer&& other) noexcept;
     Renderer& operator=(Renderer&& other) noexcept;
@@ -29,6 +30,8 @@ public:
 
     core::Result<bool> bindSwapchain(const VulkanContext& context, const Swapchain& swapchain);
     VkImageView hdrView() const { return hdrTarget_.view(); }
+    VkExtent2D hdrExtent() const { return hdrExtent_; }
+    uint32_t viewCount() const { return viewCount_; }
     using RecordFunction = std::function<void(VkCommandBuffer, VkExtent2D)>;
 
     core::Result<FrameStatus> drawFrame(const Swapchain& swapchain, const std::array<float, 4>& clearColor,
@@ -53,6 +56,8 @@ private:
     std::vector<FrameResources> frames_;
     std::vector<VkSemaphore> presentReady_;
     GpuImage hdrTarget_;
+    VkExtent2D hdrExtent_{};
+    uint32_t viewCount_ = 1;
     uint32_t frameIndex_ = 0;
 };
 

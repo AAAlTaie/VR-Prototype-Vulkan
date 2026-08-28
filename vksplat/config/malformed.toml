@@ -12,6 +12,10 @@ clear_color = [0.02, 0.03, 0.05, 1.0]
 log_statistics = true
 resolution_scale = 1.5
 
+[stereo]
+enabled = true
+interpupillary_distance = 0.065
+
 [tonemap]
 exposure = 1.0
 operator = "aces"

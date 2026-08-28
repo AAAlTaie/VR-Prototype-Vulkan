@@ -54,6 +54,7 @@ target_compile_shaders(vksplat ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders
     ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders/sort_histogram.comp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders/sort_scan.comp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders/sort_scatter.comp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders/sort_combine.comp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders/splat.vert
     ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders/splat.frag
     ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders/tonemap.vert

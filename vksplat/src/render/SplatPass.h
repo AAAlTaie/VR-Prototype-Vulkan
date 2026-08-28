@@ -1,12 +1,17 @@
 #pragma once
 
+#include <array>
+
 #include <glm/glm.hpp>
 
 #include "core/Result.h"
 #include "render/GpuBuffer.h"
+#include "render/UniqueHandle.h"
 #include "render/VulkanContext.h"
 
 namespace render {
+
+inline constexpr uint32_t kMaxViews = 2;
 
 struct ProjectionConstants {
     glm::mat4 view;
@@ -44,62 +49,80 @@ struct ScatterConstants {
     VkDeviceAddress draw;
 };
 
+struct CombineConstants {
+    VkDeviceAddress left;
+    VkDeviceAddress right;
+    VkDeviceAddress combined;
+    uint32_t viewCount;
+};
+
 struct RasterConstants {
     glm::vec2 viewport;
-    VkDeviceAddress projected;
-    VkDeviceAddress sorted;
+    VkDeviceAddress projected[kMaxViews];
+    VkDeviceAddress sorted[kMaxViews];
+    VkDeviceAddress counts[kMaxViews];
 };
 
 class SplatPass {
 public:
     static core::Result<SplatPass> create(const VulkanContext& context, VkFormat colourFormat,
-                                          uint32_t splatCount);
+                                          uint32_t splatCount, uint32_t viewCount);
 
-    SplatPass(SplatPass&& other) noexcept;
-    SplatPass& operator=(SplatPass&& other) noexcept;
+    SplatPass(SplatPass&&) noexcept = default;
+    SplatPass& operator=(SplatPass&&) noexcept = default;
     SplatPass(const SplatPass&) = delete;
     SplatPass& operator=(const SplatPass&) = delete;
-    ~SplatPass();
 
-    void recordProjection(VkCommandBuffer commandBuffer, const glm::mat4& view, glm::vec2 focal,
-                          glm::vec2 viewport, VkDeviceAddress splats, uint32_t splatCount,
-                          float depthMinimum, float depthMaximum) const;
-    void recordSort(VkCommandBuffer commandBuffer) const;
+    void recordEye(VkCommandBuffer commandBuffer, uint32_t eye, const glm::mat4& view, glm::vec2 focal,
+                   glm::vec2 viewport, VkDeviceAddress splats, uint32_t splatCount, float depthMinimum,
+                   float depthMaximum) const;
+    void recordCombine(VkCommandBuffer commandBuffer) const;
     void recordRaster(VkCommandBuffer commandBuffer, VkExtent2D extent) const;
 
-    VkDeviceAddress projectedAddress() const { return projectedAddress_; }
     uint32_t visibleSplats() const;
 
 private:
+    struct Stage {
+        UniquePipelineLayout layout;
+        UniquePipeline pipeline;
+    };
+
+    struct EyeResources {
+        GpuBuffer projected;
+        GpuBuffer keys;
+        GpuBuffer sorted;
+        GpuBuffer drawArguments;
+        VkDeviceAddress projectedAddress = 0;
+        VkDeviceAddress keysAddress = 0;
+        VkDeviceAddress sortedAddress = 0;
+        VkDeviceAddress drawAddress = 0;
+    };
+
     SplatPass() = default;
-    void destroy();
+
+    void recordProjection(VkCommandBuffer commandBuffer, const EyeResources& eye, const glm::mat4& view,
+                          glm::vec2 focal, glm::vec2 viewport, VkDeviceAddress splats,
+                          uint32_t splatCount, float depthMinimum, float depthMaximum) const;
+    void recordSort(VkCommandBuffer commandBuffer, const EyeResources& eye) const;
 
     VkDevice device_ = VK_NULL_HANDLE;
-    VkPipelineLayout projectionLayout_ = VK_NULL_HANDLE;
-    VkPipeline projectionPipeline_ = VK_NULL_HANDLE;
-    VkPipelineLayout clearLayout_ = VK_NULL_HANDLE;
-    VkPipeline clearPipeline_ = VK_NULL_HANDLE;
-    VkPipelineLayout histogramLayout_ = VK_NULL_HANDLE;
-    VkPipeline histogramPipeline_ = VK_NULL_HANDLE;
-    VkPipelineLayout scanLayout_ = VK_NULL_HANDLE;
-    VkPipeline scanPipeline_ = VK_NULL_HANDLE;
-    VkPipelineLayout scatterLayout_ = VK_NULL_HANDLE;
-    VkPipeline scatterPipeline_ = VK_NULL_HANDLE;
-    VkPipelineLayout rasterLayout_ = VK_NULL_HANDLE;
-    VkPipeline rasterPipeline_ = VK_NULL_HANDLE;
-    GpuBuffer projected_;
-    GpuBuffer drawArguments_;
+    Stage projection_;
+    Stage clear_;
+    Stage histogram_;
+    Stage scan_;
+    Stage scatter_;
+    Stage combine_;
+    Stage raster_;
+
+    std::array<EyeResources, kMaxViews> eyes_;
+    GpuBuffer combinedArguments_;
     GpuBuffer statistics_;
-    GpuBuffer keys_;
-    GpuBuffer sorted_;
-    GpuBuffer histogram_;
+    GpuBuffer histogramBuffer_;
     GpuBuffer dispatchArguments_;
-    VkDeviceAddress keysAddress_ = 0;
-    VkDeviceAddress sortedAddress_ = 0;
+    VkDeviceAddress combinedAddress_ = 0;
     VkDeviceAddress histogramAddress_ = 0;
     VkDeviceAddress dispatchAddress_ = 0;
-    VkDeviceAddress projectedAddress_ = 0;
-    VkDeviceAddress drawAddress_ = 0;
+    uint32_t viewCount_ = 1;
 };
 
 }

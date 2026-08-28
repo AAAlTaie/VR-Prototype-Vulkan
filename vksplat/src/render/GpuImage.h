@@ -13,7 +13,8 @@ public:
     GpuImage() = default;
 
     static core::Result<GpuImage> createColourTarget(VmaAllocator allocator, VkDevice device,
-                                                     VkFormat format, VkExtent2D extent);
+                                                     VkFormat format, VkExtent2D extent,
+                                                     uint32_t layers);
 
     GpuImage(GpuImage&& other) noexcept;
     GpuImage& operator=(GpuImage&& other) noexcept;

@@ -1,10 +1,11 @@
 #version 460
 
-layout(set = 0, binding = 0) uniform sampler2D hdrTarget;
+layout(set = 0, binding = 0) uniform sampler2DArray hdrTarget;
 
 layout(push_constant) uniform Constants {
     float exposure;
     uint operatorIndex;
+    uint viewCount;
 } constants;
 
 layout(location = 0) in vec2 texelCoordinate;
@@ -24,7 +25,11 @@ vec3 aces(vec3 colour) {
 }
 
 void main() {
-    vec3 colour = texture(hdrTarget, texelCoordinate).rgb * constants.exposure;
+    float scaled = texelCoordinate.x * float(constants.viewCount);
+    float layer = min(floor(scaled), float(constants.viewCount - 1u));
+    vec2 coordinate = vec2(scaled - layer, texelCoordinate.y);
+
+    vec3 colour = texture(hdrTarget, vec3(coordinate, layer)).rgb * constants.exposure;
 
     if (constants.operatorIndex == 1u) {
         colour = reinhard(colour);

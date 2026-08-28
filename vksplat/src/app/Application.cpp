@@ -51,7 +51,9 @@ core::Result<Application> Application::create(const core::Config& config) {
     spdlog::info("swapchain: {}x{}, {} images", swapchain.value().extent().width,
                  swapchain.value().extent().height, swapchain.value().imageCount());
 
-    auto renderer = render::Renderer::create(context.value(), config.renderer.framesInFlight);
+    const uint32_t viewCount = config.stereo.enabled ? render::kMaxViews : 1;
+
+    auto renderer = render::Renderer::create(context.value(), config.renderer.framesInFlight, viewCount);
     if (!renderer) {
         return core::Error{renderer.error()};
     }
@@ -67,7 +69,7 @@ core::Result<Application> Application::create(const core::Config& config) {
                  static_cast<double>(splats.value().size()) / 1048576.0);
 
     auto pass = render::SplatPass::create(context.value(), render::Renderer::kHdrFormat,
-                                          static_cast<uint32_t>(splatScene.splats.size()));
+                                          static_cast<uint32_t>(splatScene.splats.size()), viewCount);
     if (!pass) {
         return core::Error{pass.error()};
     }
@@ -116,26 +118,32 @@ core::Result<bool> Application::run() {
         previous = now;
         camera_.advance(delta);
 
-        const glm::mat4 view = camera_.view();
-
         auto status = renderer_.drawFrame(
             swapchain_, config_.renderer.clearColor,
-            [this, &view, splatAddress](VkCommandBuffer commandBuffer, VkExtent2D area) {
-                const glm::vec2 viewport{static_cast<float>(area.width), static_cast<float>(area.height)};
+            [this, splatAddress](VkCommandBuffer commandBuffer, VkExtent2D) {
+                const VkExtent2D eyeExtent = renderer_.hdrExtent();
+                const glm::vec2 viewport{static_cast<float>(eyeExtent.width),
+                                         static_cast<float>(eyeExtent.height)};
                 const float focalLength =
                     viewport.y * 0.5f / std::tan(glm::radians(camera_.fieldOfViewDegrees()) * 0.5f);
                 const float distance = camera_.distance();
                 const float depthMinimum = std::max(camera_.nearPlane(), distance - sceneRadius_);
                 const float depthMaximum = distance + sceneRadius_;
-                pass_.recordProjection(commandBuffer, view, glm::vec2{focalLength}, viewport, splatAddress,
-                                       splatCount_, depthMinimum, depthMaximum);
-                pass_.recordSort(commandBuffer);
+
+                for (uint32_t eye = 0; eye < renderer_.viewCount(); ++eye) {
+                    const glm::mat4 eyeView = camera_.eyeView(eye, renderer_.viewCount(),
+                                                              config_.stereo.interpupillaryDistance);
+                    pass_.recordEye(commandBuffer, eye, eyeView, glm::vec2{focalLength}, viewport,
+                                    splatAddress, splatCount_, depthMinimum, depthMaximum);
+                }
+                pass_.recordCombine(commandBuffer);
             },
             [this](VkCommandBuffer commandBuffer, VkExtent2D area) {
                 pass_.recordRaster(commandBuffer, area);
             },
             [this](VkCommandBuffer commandBuffer, VkExtent2D area) {
-                tonemap_.record(commandBuffer, area, renderer_.hdrView(), config_.tonemap);
+                tonemap_.record(commandBuffer, area, renderer_.hdrView(), config_.tonemap,
+                                renderer_.viewCount());
             });
 
         if (!status) {

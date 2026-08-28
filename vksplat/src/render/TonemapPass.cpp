@@ -175,7 +175,7 @@ core::Result<TonemapPass> TonemapPass::create(const VulkanContext& context, VkFo
 }
 
 void TonemapPass::record(VkCommandBuffer commandBuffer, VkExtent2D extent, VkImageView source,
-                         const core::TonemapConfig& settings) const {
+                         const core::TonemapConfig& settings, uint32_t viewCount) const {
     VkViewport viewport{};
     viewport.width = static_cast<float>(extent.width);
     viewport.height = static_cast<float>(extent.height);
@@ -196,7 +196,7 @@ void TonemapPass::record(VkCommandBuffer commandBuffer, VkExtent2D extent, VkIma
     write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     write.pImageInfo = &imageInfo;
 
-    TonemapConstants constants{settings.exposure, settings.operatorIndex};
+    TonemapConstants constants{settings.exposure, settings.operatorIndex, viewCount};
 
     vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);

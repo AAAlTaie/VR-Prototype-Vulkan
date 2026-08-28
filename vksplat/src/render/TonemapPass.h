@@ -9,6 +9,7 @@ namespace render {
 struct TonemapConstants {
     float exposure;
     uint32_t operatorIndex;
+    uint32_t viewCount;
 };
 
 class TonemapPass {
@@ -22,7 +23,7 @@ public:
     ~TonemapPass();
 
     void record(VkCommandBuffer commandBuffer, VkExtent2D extent, VkImageView source,
-                const core::TonemapConfig& settings) const;
+                const core::TonemapConfig& settings, uint32_t viewCount) const;
 
 private:
     TonemapPass() = default;

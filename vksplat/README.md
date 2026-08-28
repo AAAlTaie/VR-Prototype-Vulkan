@@ -4,7 +4,7 @@ C++20 Vulkan 1.3 renderer for real-time 3D Gaussian splatting, with single-pass 
 
 ## Status
 
-In active development. Loads 3DGS `.ply` scenes, projects each gaussian to a screen-space conic in a compute pass, and rasterises them with indirect draws. Depth sorting is not yet implemented, so blending order is arbitrary.
+In active development. Loads 3DGS `.ply` scenes, projects each gaussian to a screen-space conic in a compute pass, sorts back to front with a GPU counting sort, composites into an HDR target and tonemaps. Renders both eyes in a single multiview pass. OpenXR integration is not yet implemented.
 
 | Phase | Scope | State |
 |---|---|---|
@@ -12,9 +12,9 @@ In active development. Loads 3DGS `.ply` scenes, projects each gaussian to a scr
 | 1 | Device, swapchain, frame loop | Done |
 | 2 | Splat asset pipeline | Done |
 | 3 | Projection and rasterisation | Done |
-| 4 | Depth sort and HDR composite | Next |
-| 5 | Single-pass stereo | |
-| 6 | OpenXR integration and profiling | |
+| 4 | Depth sort and HDR composite | Done |
+| 5 | Single-pass stereo | Done |
+| 6 | OpenXR integration and profiling | Next |
 
 ## Requirements
 
@@ -43,7 +43,7 @@ Real 3DGS scenes are hundreds of megabytes, so a generator is included:
 python3 tools/make_test_scene.py assets/test_galaxy.ply --count 200000
 ```
 
-`--sh-degree 0..3` controls how many spherical harmonic coefficients are written. Point `scene.path` in the config at any 3DGS `.ply`; trained scenes from the INRIA reference implementation load unmodified.
+`--sh-degree 0..3` controls how many spherical harmonic coefficients are written. `--shape layers` produces a two-sheet scene used to verify depth sort direction. Point `scene.path` in the config at any 3DGS `.ply`; trained scenes from the INRIA reference implementation load unmodified.
 
 ## Configuration
 
@@ -53,7 +53,13 @@ Runtime settings live in `config/app.toml`. Nothing is compiled in. Unknown keys
 [renderer]
 validation = true
 clear_color = [0.02, 0.03, 0.05, 1.0]
+
+[stereo]
+enabled = true
+interpupillary_distance = 0.065
 ```
+
+Set `stereo.enabled = false` for full-width mono output.
 
 Pass an alternative file as the first argument.
 
@@ -65,6 +71,8 @@ Pass an alternative file as the first argument.
 | Linux | GCC 13, `-Werror` | lavapipe (software) |
 
 Zero validation-layer messages on both.
+
+Phase 3 baseline on the Quadro RTX 5000: 200,000 splats at 1600x900 in 2.1 ms per frame, entirely GPU-bound.
 
 ## Documentation
 
