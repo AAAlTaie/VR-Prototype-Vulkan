@@ -53,7 +53,28 @@ def spiral_galaxy(count, rng):
         yield x, y, z, colour, scale, opacity, rotation
 
 
-def write_ply(path, count, seed, sh_degree):
+def depth_layers(count, rng):
+    """Two opposing sheets: near red, far blue. Correct back-to-front blending shows red."""
+    for index in range(count):
+        near = index % 2 == 0
+        x = 0.5 if near else -0.5
+        colour = (0.9, 0.1, 0.1) if near else (0.1, 0.1, 0.9)
+
+        yield (
+            x + rng.gauss(0.0, 0.01),
+            rng.uniform(-1.0, 1.0),
+            rng.uniform(-1.0, 1.0),
+            colour,
+            0.02,
+            0.9,
+            (1.0, 0.0, 0.0, 0.0),
+        )
+
+
+SHAPES = {"galaxy": spiral_galaxy, "layers": depth_layers}
+
+
+def write_ply(path, count, seed, sh_degree, shape):
     rng = random.Random(seed)
     properties = build_properties(sh_degree)
     rest_count = len(properties) - 17
@@ -71,7 +92,7 @@ def write_ply(path, count, seed, sh_degree):
 
     with open(path, "wb") as handle:
         handle.write(("\n".join(header) + "\n").encode("ascii"))
-        for x, y, z, colour, scale, opacity, rotation in spiral_galaxy(count, rng):
+        for x, y, z, colour, scale, opacity, rotation in SHAPES[shape](count, rng):
             values = [
                 x, y, z,
                 0.0, 0.0, 0.0,
@@ -92,10 +113,11 @@ def main():
     parser.add_argument("--count", type=int, default=200000)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--sh-degree", type=int, default=0, choices=[0, 1, 2, 3])
+    parser.add_argument("--shape", default="galaxy", choices=sorted(SHAPES))
     arguments = parser.parse_args()
 
-    payload = write_ply(arguments.output, arguments.count, arguments.seed, arguments.sh_degree)
-    print(f"wrote {arguments.output}: {arguments.count} splats, {payload / 1048576:.1f} MiB payload")
+    payload = write_ply(arguments.output, arguments.count, arguments.seed, arguments.sh_degree, arguments.shape)
+    print(f"wrote {arguments.output}: {arguments.shape}, {arguments.count} splats, {payload / 1048576:.1f} MiB payload")
     return 0
 
 

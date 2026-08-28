@@ -108,6 +108,25 @@ RendererConfig parseRenderer(const toml::table& root) {
     };
 }
 
+TonemapConfig parseTonemap(const toml::table& root) {
+    const toml::table& table = requireSection(root, "tonemap");
+    requireOnlyKeys(table, "[tonemap]", {"exposure", "operator"});
+
+    const auto name = requireField<std::string>(table, "[tonemap]", "operator");
+    uint32_t index = 0;
+    if (name == "none") {
+        index = 0;
+    } else if (name == "reinhard") {
+        index = 1;
+    } else if (name == "aces") {
+        index = 2;
+    } else {
+        fail("key 'operator' in [tonemap] must be one of: none, reinhard, aces");
+    }
+
+    return {requireFloat(table, "[tonemap]", "exposure", 0.01f, 100.0f), index};
+}
+
 CameraConfig parseCamera(const toml::table& root) {
     const toml::table& table = requireSection(root, "camera");
     requireOnlyKeys(table, "[camera]",
@@ -134,8 +153,9 @@ SceneConfig parseScene(const toml::table& root) {
 Result<Config> loadConfig(const std::filesystem::path& file) {
     try {
         const toml::table root = toml::parse_file(file.string());
-        requireOnlyKeys(root, "root", {"window", "renderer", "camera", "scene"});
-        return Config{parseWindow(root), parseRenderer(root), parseCamera(root), parseScene(root)};
+        requireOnlyKeys(root, "root", {"window", "renderer", "tonemap", "camera", "scene"});
+        return Config{parseWindow(root), parseRenderer(root), parseTonemap(root), parseCamera(root),
+                      parseScene(root)};
     } catch (const toml::parse_error& error) {
         return Error{file.string() + ": " + std::string(error.description())};
     } catch (const SchemaError& error) {

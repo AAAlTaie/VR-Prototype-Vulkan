@@ -7,6 +7,7 @@
 #include "platform/Window.h"
 #include "render/GpuBuffer.h"
 #include "render/SplatPass.h"
+#include "render/TonemapPass.h"
 #include "render/Renderer.h"
 #include "render/Swapchain.h"
 #include "render/VulkanContext.h"
@@ -28,7 +29,7 @@ public:
 private:
     Application(core::Config config, platform::Window window, render::VulkanContext context,
                 render::Swapchain swapchain, render::Renderer renderer, render::GpuBuffer splats,
-                render::SplatPass pass, scene::OrbitCamera camera, uint32_t splatCount)
+                render::SplatPass pass, render::TonemapPass tonemap, scene::OrbitCamera camera, uint32_t splatCount, float sceneRadius)
         : config_(std::move(config)),
           window_(std::move(window)),
           context_(std::move(context)),
@@ -36,8 +37,10 @@ private:
           renderer_(std::move(renderer)),
           splats_(std::move(splats)),
           pass_(std::move(pass)),
+          tonemap_(std::move(tonemap)),
           camera_(std::move(camera)),
-          splatCount_(splatCount) {}
+          splatCount_(splatCount),
+          sceneRadius_(sceneRadius) {}
 
     core::Result<bool> recreateSwapchain();
 
@@ -48,8 +51,10 @@ private:
     render::Renderer renderer_;
     render::GpuBuffer splats_;
     render::SplatPass pass_;
+    render::TonemapPass tonemap_;
     scene::OrbitCamera camera_;
     uint32_t splatCount_ = 0;
+    float sceneRadius_ = 0.0f;
     std::chrono::steady_clock::time_point lastReport_{};
     uint32_t framesSinceReport_ = 0;
 };

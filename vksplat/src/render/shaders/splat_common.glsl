@@ -27,6 +27,24 @@ layout(buffer_reference, std430) buffer ProjectedBuffer {
     Projected entries[];
 };
 
+layout(buffer_reference, std430) buffer KeyBuffer {
+    uint keys[];
+};
+
+layout(buffer_reference, std430) buffer IndexBuffer {
+    uint indices[];
+};
+
+layout(buffer_reference, std430) buffer HistogramBuffer {
+    uint counts[];
+};
+
+layout(buffer_reference, std430) buffer DispatchArguments {
+    uint x;
+    uint y;
+    uint z;
+};
+
 layout(buffer_reference, std430) buffer DrawArguments {
     uint vertexCount;
     uint instanceCount;

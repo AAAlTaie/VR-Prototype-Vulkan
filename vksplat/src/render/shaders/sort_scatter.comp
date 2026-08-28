@@ -1,0 +1,22 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+#include "splat_common.glsl"
+
+layout(local_size_x = 256) in;
+
+layout(push_constant) uniform Constants {
+    KeyBuffer keys;
+    HistogramBuffer histogram;
+    IndexBuffer sorted;
+    DrawArguments draw;
+} constants;
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= constants.draw.instanceCount) {
+        return;
+    }
+    uint slot = atomicAdd(constants.histogram.counts[constants.keys.keys[index]], 1u);
+    constants.sorted.indices[slot] = index;
+}

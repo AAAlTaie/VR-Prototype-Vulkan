@@ -64,6 +64,7 @@ core::Result<VulkanContext> VulkanContext::create(const platform::Window& window
     features.shaderInt64 = VK_TRUE;
 
     vkb::PhysicalDeviceSelector selector(context.instance_, context.surface_);
+    selector.add_required_extension(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
     selector.set_minimum_version(1, 3)
         .set_required_features_13(features13)
         .set_required_features_12(features12)

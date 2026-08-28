@@ -11,6 +11,10 @@ frames_in_flight = 2
 clear_color = [0.02, 0.03, 0.05, 1.0]
 log_statistics = true
 
+[tonemap]
+exposure = 1.0
+operator = "aces"
+
 [camera]
 field_of_view_degrees = 55.0
 near_plane = 0.01

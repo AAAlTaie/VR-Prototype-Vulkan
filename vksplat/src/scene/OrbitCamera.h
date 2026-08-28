@@ -15,6 +15,7 @@ public:
     glm::mat4 view() const;
     float fieldOfViewDegrees() const { return config_.fieldOfViewDegrees; }
     float nearPlane() const { return config_.nearPlane; }
+    float distance() const { return distance_; }
 
 private:
     core::CameraConfig config_;

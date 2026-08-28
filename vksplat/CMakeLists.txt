@@ -19,7 +19,9 @@ add_executable(vksplat
     src/core/Logger.cpp
     src/platform/Paths.cpp
     src/render/GpuBuffer.cpp
+    src/render/GpuImage.cpp
     src/render/SplatPass.cpp
+    src/render/TonemapPass.cpp
     src/render/Upload.cpp
     src/render/VmaImplementation.cpp
     src/scene/OrbitCamera.cpp
@@ -48,8 +50,14 @@ set_source_files_properties(src/render/VmaImplementation.cpp PROPERTIES
 
 target_compile_shaders(vksplat ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders
     ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders/project.comp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders/sort_clear.comp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders/sort_histogram.comp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders/sort_scan.comp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders/sort_scatter.comp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders/splat.vert
     ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders/splat.frag
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders/tonemap.vert
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders/tonemap.frag
 )
 
 if(MSVC)

@@ -32,14 +32,8 @@ void submitBarrier(VkCommandBuffer commandBuffer, const VkImageMemoryBarrier2& b
     vkCmdPipelineBarrier2(commandBuffer, &dependency);
 }
 
-void recordFrame(VkCommandBuffer commandBuffer, VkImage image, VkImageView view, VkExtent2D extent,
-                 const std::array<float, 4>& color, const Renderer::RecordFunction& record) {
-    submitBarrier(commandBuffer,
-                  makeLayoutBarrier(image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                                    VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
-                                    VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT));
-
+void beginColourPass(VkCommandBuffer commandBuffer, VkImageView view, VkExtent2D extent,
+                     const std::array<float, 4>& color) {
     VkRenderingAttachmentInfo attachment{};
     attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
     attachment.imageView = view;
@@ -56,17 +50,6 @@ void recordFrame(VkCommandBuffer commandBuffer, VkImage image, VkImageView view,
     rendering.pColorAttachments = &attachment;
 
     vkCmdBeginRendering(commandBuffer, &rendering);
-    if (record) {
-        record(commandBuffer, extent);
-    }
-    vkCmdEndRendering(commandBuffer);
-
-    submitBarrier(commandBuffer,
-                  makeLayoutBarrier(image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                                    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                                    VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                                    VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, 0));
 }
 
 }
@@ -114,8 +97,15 @@ core::Result<Renderer> Renderer::create(const VulkanContext& context, uint32_t f
     return core::Result<Renderer>(std::move(renderer));
 }
 
-core::Result<bool> Renderer::bindSwapchain(const Swapchain& swapchain) {
+core::Result<bool> Renderer::bindSwapchain(const VulkanContext& context, const Swapchain& swapchain) {
     releasePresentSemaphores();
+
+    auto target = GpuImage::createColourTarget(context.allocator(), device_, kHdrFormat,
+                                               swapchain.extent());
+    if (!target) {
+        return core::Error{target.error()};
+    }
+    hdrTarget_ = target.take();
 
     VkSemaphoreCreateInfo semaphoreInfo{};
     semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -132,7 +122,8 @@ core::Result<bool> Renderer::bindSwapchain(const Swapchain& swapchain) {
 core::Result<FrameStatus> Renderer::drawFrame(const Swapchain& swapchain,
                                               const std::array<float, 4>& clearColor,
                                               const RecordFunction& beforePass,
-                                              const RecordFunction& insidePass) {
+                                              const RecordFunction& scenePass,
+                                              const RecordFunction& compositePass) {
     FrameResources& frame = frames_[frameIndex_];
 
     if (vkWaitForFences(device_, 1, &frame.inFlight, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
@@ -156,11 +147,52 @@ core::Result<FrameStatus> Renderer::drawFrame(const Swapchain& swapchain,
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
+    const VkExtent2D extent = swapchain.extent();
+
     if (beforePass) {
-        beforePass(frame.commandBuffer, swapchain.extent());
+        beforePass(frame.commandBuffer, extent);
     }
-    recordFrame(frame.commandBuffer, swapchain.image(imageIndex), swapchain.imageView(imageIndex),
-                swapchain.extent(), clearColor, insidePass);
+
+    submitBarrier(frame.commandBuffer,
+                  makeLayoutBarrier(hdrTarget_.handle(), VK_IMAGE_LAYOUT_UNDEFINED,
+                                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                    VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
+                                    VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT));
+
+    beginColourPass(frame.commandBuffer, hdrTarget_.view(), extent, clearColor);
+    if (scenePass) {
+        scenePass(frame.commandBuffer, extent);
+    }
+    vkCmdEndRendering(frame.commandBuffer);
+
+    submitBarrier(frame.commandBuffer,
+                  makeLayoutBarrier(hdrTarget_.handle(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                    VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                                    VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                                    VK_ACCESS_2_SHADER_SAMPLED_READ_BIT));
+
+    submitBarrier(frame.commandBuffer,
+                  makeLayoutBarrier(swapchain.image(imageIndex), VK_IMAGE_LAYOUT_UNDEFINED,
+                                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                    VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
+                                    VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT));
+
+    beginColourPass(frame.commandBuffer, swapchain.imageView(imageIndex), extent, clearColor);
+    if (compositePass) {
+        compositePass(frame.commandBuffer, extent);
+    }
+    vkCmdEndRendering(frame.commandBuffer);
+
+    submitBarrier(frame.commandBuffer,
+                  makeLayoutBarrier(swapchain.image(imageIndex), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                                    VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                                    VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, 0));
     if (vkEndCommandBuffer(frame.commandBuffer) != VK_SUCCESS) {
         return core::Error{"vkEndCommandBuffer failed"};
     }
@@ -224,6 +256,7 @@ Renderer::Renderer(Renderer&& other) noexcept
       queue_(std::exchange(other.queue_, VK_NULL_HANDLE)),
       frames_(std::move(other.frames_)),
       presentReady_(std::move(other.presentReady_)),
+      hdrTarget_(std::move(other.hdrTarget_)),
       frameIndex_(other.frameIndex_) {
     other.frames_.clear();
     other.presentReady_.clear();
@@ -236,6 +269,7 @@ Renderer& Renderer::operator=(Renderer&& other) noexcept {
         queue_ = std::exchange(other.queue_, VK_NULL_HANDLE);
         frames_ = std::move(other.frames_);
         presentReady_ = std::move(other.presentReady_);
+        hdrTarget_ = std::move(other.hdrTarget_);
         frameIndex_ = other.frameIndex_;
         other.frames_.clear();
         other.presentReady_.clear();

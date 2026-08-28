@@ -1,0 +1,22 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+#include "splat_common.glsl"
+
+layout(local_size_x = 256) in;
+
+layout(push_constant) uniform Constants {
+    HistogramBuffer histogram;
+    DrawArguments draw;
+    DispatchArguments dispatch;
+} constants;
+
+void main() {
+    constants.histogram.counts[gl_GlobalInvocationID.x] = 0u;
+
+    if (gl_GlobalInvocationID.x == 0u) {
+        constants.dispatch.x = (constants.draw.instanceCount + 255u) / 256u;
+        constants.dispatch.y = 1u;
+        constants.dispatch.z = 1u;
+    }
+}

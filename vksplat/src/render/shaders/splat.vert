@@ -6,6 +6,7 @@
 layout(push_constant) uniform Constants {
     vec2 viewport;
     ProjectedBuffer projected;
+    IndexBuffer sorted;
 } constants;
 
 layout(location = 0) out vec2 splatCentre;
@@ -13,7 +14,7 @@ layout(location = 1) out vec4 conicOpacity;
 layout(location = 2) out vec3 splatColour;
 
 void main() {
-    Projected entry = constants.projected.entries[gl_InstanceIndex];
+    Projected entry = constants.projected.entries[constants.sorted.indices[gl_InstanceIndex]];
 
     vec2 corner = vec2((gl_VertexIndex & 1) == 0 ? -1.0 : 1.0,
                        (gl_VertexIndex & 2) == 0 ? -1.0 : 1.0);

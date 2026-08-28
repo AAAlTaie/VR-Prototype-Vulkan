@@ -12,8 +12,10 @@ layout(push_constant) uniform Constants {
     SplatBuffer splats;
     ProjectedBuffer projected;
     DrawArguments draw;
+    KeyBuffer keys;
     uint splatCount;
-    float nearPlane;
+    float depthMinimum;
+    float depthMaximum;
 } constants;
 
 mat3 rotationFromQuaternion(vec4 q) {
@@ -38,7 +40,7 @@ void main() {
 
     vec3 viewPosition = (constants.view * vec4(splat.position, 1.0)).xyz;
     vec3 camera = vec3(viewPosition.x, -viewPosition.y, -viewPosition.z);
-    if (camera.z <= constants.nearPlane) {
+    if (camera.z <= constants.depthMinimum) {
         return;
     }
 
@@ -90,4 +92,8 @@ void main() {
     constants.projected.entries[slot].conicOpacity =
         vec4(c * inverseDeterminant, -b * inverseDeterminant, a * inverseDeterminant, splat.opacity);
     constants.projected.entries[slot].colour = vec4(splat.colour, 0.0);
+
+    float normalised = clamp((camera.z - constants.depthMinimum) /
+                             (constants.depthMaximum - constants.depthMinimum), 0.0, 1.0);
+    constants.keys.keys[slot] = 65535u - uint(normalised * 65535.0);
 }

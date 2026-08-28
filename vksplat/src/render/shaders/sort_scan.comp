@@ -1,0 +1,39 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+#include "splat_common.glsl"
+
+layout(local_size_x = 256) in;
+
+layout(push_constant) uniform Constants {
+    HistogramBuffer histogram;
+} constants;
+
+shared uint chunkTotals[256];
+
+void main() {
+    uint thread = gl_LocalInvocationID.x;
+    uint base = thread * 256u;
+
+    uint running = 0u;
+    for (uint i = 0u; i < 256u; ++i) {
+        running += constants.histogram.counts[base + i];
+    }
+    chunkTotals[thread] = running;
+
+    barrier();
+
+    uint chunkOffset = 0u;
+    for (uint i = 0u; i < thread; ++i) {
+        chunkOffset += chunkTotals[i];
+    }
+
+    barrier();
+
+    uint prefix = chunkOffset;
+    for (uint i = 0u; i < 256u; ++i) {
+        uint count = constants.histogram.counts[base + i];
+        constants.histogram.counts[base + i] = prefix;
+        prefix += count;
+    }
+}

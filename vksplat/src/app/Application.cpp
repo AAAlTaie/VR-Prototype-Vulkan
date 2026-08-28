@@ -2,6 +2,7 @@
 
 #include "core/Logger.h"
 #include "platform/Paths.h"
+#include <algorithm>
 #include <cmath>
 
 #include <glm/trigonometric.hpp>
@@ -65,18 +66,23 @@ core::Result<Application> Application::create(const core::Config& config) {
     spdlog::info("uploaded {:.1f} MiB to device-local memory",
                  static_cast<double>(splats.value().size()) / 1048576.0);
 
-    auto pass = render::SplatPass::create(context.value(), swapchain.value().format(),
+    auto pass = render::SplatPass::create(context.value(), render::Renderer::kHdrFormat,
                                           static_cast<uint32_t>(splatScene.splats.size()));
     if (!pass) {
         return core::Error{pass.error()};
     }
 
-    Application application(config, window.take(), context.take(), swapchain.take(), renderer.take(),
-                            splats.take(), pass.take(),
-                            scene::OrbitCamera(config.camera, bounds),
-                            static_cast<uint32_t>(splatScene.splats.size()));
+    auto tonemap = render::TonemapPass::create(context.value(), swapchain.value().format());
+    if (!tonemap) {
+        return core::Error{tonemap.error()};
+    }
 
-    auto bound = application.renderer_.bindSwapchain(application.swapchain_);
+    Application application(config, window.take(), context.take(), swapchain.take(), renderer.take(),
+                            splats.take(), pass.take(), tonemap.take(),
+                            scene::OrbitCamera(config.camera, bounds),
+                            static_cast<uint32_t>(splatScene.splats.size()), bounds.radius());
+
+    auto bound = application.renderer_.bindSwapchain(application.context_, application.swapchain_);
     if (!bound) {
         return core::Error{bound.error()};
     }
@@ -94,7 +100,7 @@ core::Result<bool> Application::recreateSwapchain() {
 
     swapchain_ = replacement.take();
     spdlog::info("swapchain resized to {}x{}", swapchain_.extent().width, swapchain_.extent().height);
-    return renderer_.bindSwapchain(swapchain_);
+    return renderer_.bindSwapchain(context_, swapchain_);
 }
 
 core::Result<bool> Application::run() {
@@ -118,11 +124,18 @@ core::Result<bool> Application::run() {
                 const glm::vec2 viewport{static_cast<float>(area.width), static_cast<float>(area.height)};
                 const float focalLength =
                     viewport.y * 0.5f / std::tan(glm::radians(camera_.fieldOfViewDegrees()) * 0.5f);
+                const float distance = camera_.distance();
+                const float depthMinimum = std::max(camera_.nearPlane(), distance - sceneRadius_);
+                const float depthMaximum = distance + sceneRadius_;
                 pass_.recordProjection(commandBuffer, view, glm::vec2{focalLength}, viewport, splatAddress,
-                                       splatCount_, camera_.nearPlane());
+                                       splatCount_, depthMinimum, depthMaximum);
+                pass_.recordSort(commandBuffer);
             },
             [this](VkCommandBuffer commandBuffer, VkExtent2D area) {
                 pass_.recordRaster(commandBuffer, area);
+            },
+            [this](VkCommandBuffer commandBuffer, VkExtent2D area) {
+                tonemap_.record(commandBuffer, area, renderer_.hdrView(), config_.tonemap);
             });
 
         if (!status) {

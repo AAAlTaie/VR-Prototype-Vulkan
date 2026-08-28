@@ -24,6 +24,11 @@ struct RendererConfig {
     bool logStatistics;
 };
 
+struct TonemapConfig {
+    float exposure;
+    uint32_t operatorIndex;
+};
+
 struct CameraConfig {
     float fieldOfViewDegrees;
     float nearPlane;
@@ -40,6 +45,7 @@ struct SceneConfig {
 struct Config {
     WindowConfig window;
     RendererConfig renderer;
+    TonemapConfig tonemap;
     CameraConfig camera;
     SceneConfig scene;
 };
