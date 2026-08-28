@@ -1,0 +1,93 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+
+#include "splat_common.glsl"
+
+layout(local_size_x = 256) in;
+
+layout(push_constant) uniform Constants {
+    mat4 view;
+    vec2 focal;
+    vec2 viewport;
+    SplatBuffer splats;
+    ProjectedBuffer projected;
+    DrawArguments draw;
+    uint splatCount;
+    float nearPlane;
+} constants;
+
+mat3 rotationFromQuaternion(vec4 q) {
+    float w = q.x;
+    float x = q.y;
+    float y = q.z;
+    float z = q.w;
+
+    return mat3(
+        1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y + w * z),       2.0 * (x * z - w * y),
+        2.0 * (x * y - w * z),       1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z + w * x),
+        2.0 * (x * z + w * y),       2.0 * (y * z - w * x),       1.0 - 2.0 * (x * x + y * y));
+}
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= constants.splatCount) {
+        return;
+    }
+
+    Splat splat = constants.splats.splats[index];
+
+    vec3 viewPosition = (constants.view * vec4(splat.position, 1.0)).xyz;
+    vec3 camera = vec3(viewPosition.x, -viewPosition.y, -viewPosition.z);
+    if (camera.z <= constants.nearPlane) {
+        return;
+    }
+
+    vec2 centre = constants.viewport * 0.5 + constants.focal * camera.xy / camera.z;
+
+    mat3 rotation = rotationFromQuaternion(splat.rotation);
+    mat3 scaled = mat3(rotation[0] * splat.scale.x, rotation[1] * splat.scale.y,
+                       rotation[2] * splat.scale.z);
+    mat3 covariance = scaled * transpose(scaled);
+
+    mat3 flip = mat3(1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, -1.0);
+    mat3 world = flip * mat3(constants.view);
+
+    float inverseDepth = 1.0 / camera.z;
+    float inverseDepthSquared = inverseDepth * inverseDepth;
+    mat3 jacobian = mat3(
+        constants.focal.x * inverseDepth, 0.0, 0.0,
+        0.0, constants.focal.y * inverseDepth, 0.0,
+        -constants.focal.x * camera.x * inverseDepthSquared,
+        -constants.focal.y * camera.y * inverseDepthSquared, 0.0);
+
+    mat3 transform = jacobian * world;
+    mat3 screenCovariance = transform * covariance * transpose(transform);
+
+    float a = screenCovariance[0][0] + 0.3;
+    float b = screenCovariance[0][1];
+    float c = screenCovariance[1][1] + 0.3;
+
+    float determinant = a * c - b * b;
+    if (determinant <= 0.0) {
+        return;
+    }
+
+    float middle = 0.5 * (a + c);
+    float largestEigenvalue = middle + sqrt(max(0.01, middle * middle - determinant));
+    float radius = 3.0 * sqrt(largestEigenvalue);
+
+    if (centre.x + radius < 0.0 || centre.x - radius > constants.viewport.x ||
+        centre.y + radius < 0.0 || centre.y - radius > constants.viewport.y) {
+        return;
+    }
+
+    float inverseDeterminant = 1.0 / determinant;
+    uint slot = atomicAdd(constants.draw.instanceCount, 1);
+
+    constants.projected.entries[slot].centre = centre;
+    constants.projected.entries[slot].radius = radius;
+    constants.projected.entries[slot].depth = camera.z;
+    constants.projected.entries[slot].conicOpacity =
+        vec4(c * inverseDeterminant, -b * inverseDeterminant, a * inverseDeterminant, splat.opacity);
+    constants.projected.entries[slot].colour = vec4(splat.colour, 0.0);
+}
