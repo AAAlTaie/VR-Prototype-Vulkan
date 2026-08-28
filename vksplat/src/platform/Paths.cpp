@@ -48,7 +48,15 @@ std::filesystem::path executableDirectory() {
 }
 
 std::vector<std::filesystem::path> resourceSearchPaths(const std::filesystem::path& relative) {
-    return {std::filesystem::current_path() / relative, executableDirectory() / relative};
+    std::vector<std::filesystem::path> candidates{std::filesystem::current_path() / relative,
+                                                  executableDirectory() / relative};
+
+    std::error_code error;
+    if (std::filesystem::equivalent(candidates.front().parent_path(),
+                                    candidates.back().parent_path(), error)) {
+        candidates.pop_back();
+    }
+    return candidates;
 }
 
 core::Result<std::filesystem::path> resolveResource(const std::filesystem::path& requested) {

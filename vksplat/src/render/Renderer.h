@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <functional>
 #include <vector>
 
 #include <volk.h>
@@ -24,7 +25,10 @@ public:
     ~Renderer();
 
     core::Result<bool> bindSwapchain(const Swapchain& swapchain);
-    core::Result<FrameStatus> drawFrame(const Swapchain& swapchain, const std::array<float, 4>& clearColor);
+    using RecordFunction = std::function<void(VkCommandBuffer, VkExtent2D)>;
+
+    core::Result<FrameStatus> drawFrame(const Swapchain& swapchain, const std::array<float, 4>& clearColor,
+                                        const RecordFunction& beforePass, const RecordFunction& insidePass);
     void waitIdle() const;
 
 private:

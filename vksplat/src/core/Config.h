@@ -21,6 +21,16 @@ struct RendererConfig {
     std::string preferredDevice;
     uint32_t framesInFlight;
     std::array<float, 4> clearColor;
+    bool logStatistics;
+};
+
+struct CameraConfig {
+    float fieldOfViewDegrees;
+    float nearPlane;
+    float farPlane;
+    float orbitDegreesPerSecond;
+    float elevationDegrees;
+    float distanceMultiplier;
 };
 
 struct SceneConfig {
@@ -30,6 +40,7 @@ struct SceneConfig {
 struct Config {
     WindowConfig window;
     RendererConfig renderer;
+    CameraConfig camera;
     SceneConfig scene;
 };
 

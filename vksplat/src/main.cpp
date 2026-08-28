@@ -7,23 +7,23 @@
 
 namespace {
 
-    constexpr const char* kDefaultConfigPath = "config/app.toml";
+constexpr const char* kDefaultConfigPath = "config/app.toml";
 
-    void logResolvedConfig(const core::Config& config) {
-        spdlog::info("window.width          = {}", config.window.width);
-        spdlog::info("window.height         = {}", config.window.height);
-        spdlog::info("window.title          = {}", config.window.title);
-        spdlog::info("window.vsync          = {}", config.window.vsync);
-        spdlog::info("renderer.validation   = {}", config.renderer.validation);
-        spdlog::info("renderer.device       = {}",
+void logResolvedConfig(const core::Config& config) {
+    spdlog::info("window.width          = {}", config.window.width);
+    spdlog::info("window.height         = {}", config.window.height);
+    spdlog::info("window.title          = {}", config.window.title);
+    spdlog::info("window.vsync          = {}", config.window.vsync);
+    spdlog::info("renderer.validation   = {}", config.renderer.validation);
+    spdlog::info("renderer.device       = {}",
                  config.renderer.preferredDevice.empty() ? "<auto>" : config.renderer.preferredDevice);
-        spdlog::info("renderer.frames       = {}", config.renderer.framesInFlight);
-        spdlog::info("renderer.clear_color  = [{}, {}, {}, {}]", config.renderer.clearColor[0],
+    spdlog::info("renderer.frames       = {}", config.renderer.framesInFlight);
+    spdlog::info("renderer.clear_color  = [{}, {}, {}, {}]", config.renderer.clearColor[0],
                  config.renderer.clearColor[1], config.renderer.clearColor[2],
                  config.renderer.clearColor[3]);
-        spdlog::info("scene.path            = {}",
+    spdlog::info("scene.path            = {}",
                  config.scene.path.empty() ? "<unset>" : config.scene.path);
-    }
+}
 
 }
 

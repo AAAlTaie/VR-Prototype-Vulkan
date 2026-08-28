@@ -74,6 +74,16 @@ std::array<float, 4> requireNormalizedColor(const toml::table& table, std::strin
     return color;
 }
 
+float requireFloat(const toml::table& table, std::string_view scope, std::string_view key, float minimum,
+                   float maximum) {
+    const auto value = table[key].value<double>();
+    if (!value || *value < static_cast<double>(minimum) || *value > static_cast<double>(maximum)) {
+        fail(std::string("key '").append(key).append("' in ").append(scope).append(" must be between ") +
+             std::to_string(minimum) + " and " + std::to_string(maximum));
+    }
+    return static_cast<float>(*value);
+}
+
 WindowConfig parseWindow(const toml::table& root) {
     const toml::table& table = requireSection(root, "window");
     requireOnlyKeys(table, "[window]", {"width", "height", "title", "vsync"});
@@ -88,12 +98,28 @@ WindowConfig parseWindow(const toml::table& root) {
 RendererConfig parseRenderer(const toml::table& root) {
     const toml::table& table = requireSection(root, "renderer");
     requireOnlyKeys(table, "[renderer]",
-                    {"validation", "preferred_device", "frames_in_flight", "clear_color"});
+                    {"validation", "preferred_device", "frames_in_flight", "clear_color", "log_statistics"});
     return {
         requireField<bool>(table, "[renderer]", "validation"),
         requireField<std::string>(table, "[renderer]", "preferred_device"),
         requirePositive(table, "[renderer]", "frames_in_flight", 3),
         requireNormalizedColor(table, "[renderer]", "clear_color"),
+        requireField<bool>(table, "[renderer]", "log_statistics"),
+    };
+}
+
+CameraConfig parseCamera(const toml::table& root) {
+    const toml::table& table = requireSection(root, "camera");
+    requireOnlyKeys(table, "[camera]",
+                    {"field_of_view_degrees", "near_plane", "far_plane", "orbit_degrees_per_second",
+                     "elevation_degrees", "distance_multiplier"});
+    return {
+        requireFloat(table, "[camera]", "field_of_view_degrees", 1.0f, 179.0f),
+        requireFloat(table, "[camera]", "near_plane", 0.0001f, 1000.0f),
+        requireFloat(table, "[camera]", "far_plane", 0.001f, 100000.0f),
+        requireFloat(table, "[camera]", "orbit_degrees_per_second", -360.0f, 360.0f),
+        requireFloat(table, "[camera]", "elevation_degrees", -89.0f, 89.0f),
+        requireFloat(table, "[camera]", "distance_multiplier", 0.1f, 100.0f),
     };
 }
 
@@ -108,8 +134,8 @@ SceneConfig parseScene(const toml::table& root) {
 Result<Config> loadConfig(const std::filesystem::path& file) {
     try {
         const toml::table root = toml::parse_file(file.string());
-        requireOnlyKeys(root, "root", {"window", "renderer", "scene"});
-        return Config{parseWindow(root), parseRenderer(root), parseScene(root)};
+        requireOnlyKeys(root, "root", {"window", "renderer", "camera", "scene"});
+        return Config{parseWindow(root), parseRenderer(root), parseCamera(root), parseScene(root)};
     } catch (const toml::parse_error& error) {
         return Error{file.string() + ": " + std::string(error.description())};
     } catch (const SchemaError& error) {

@@ -10,6 +10,7 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 include(cmake/Dependencies.cmake)
+include(cmake/Shaders.cmake)
 
 add_executable(vksplat
     src/main.cpp
@@ -17,6 +18,12 @@ add_executable(vksplat
     src/core/Config.cpp
     src/core/Logger.cpp
     src/platform/Paths.cpp
+    src/render/GpuBuffer.cpp
+    src/render/SplatPass.cpp
+    src/render/Upload.cpp
+    src/render/VmaImplementation.cpp
+    src/scene/OrbitCamera.cpp
+    src/scene/SplatScene.cpp
     src/platform/Window.cpp
     src/render/Renderer.cpp
     src/render/Swapchain.cpp
@@ -31,6 +38,18 @@ target_link_libraries(vksplat PRIVATE
     glfw
     volk
     vk-bootstrap::vk-bootstrap
+    glm::glm
+    GPUOpen::VulkanMemoryAllocator
+)
+
+set_source_files_properties(src/render/VmaImplementation.cpp PROPERTIES
+    COMPILE_OPTIONS "$<IF:$<CXX_COMPILER_ID:MSVC>,/W0,-w>"
+)
+
+target_compile_shaders(vksplat ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders/project.comp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders/splat.vert
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/render/shaders/splat.frag
 )
 
 if(MSVC)
@@ -47,5 +66,5 @@ add_custom_command(TARGET vksplat POST_BUILD
 )
 
 set_target_properties(vksplat PROPERTIES
-    VS_DEBUGGER_WORKING_DIRECTORY $<TARGET_FILE_DIR:vksplat>
+    VS_DEBUGGER_WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )

@@ -3,6 +3,7 @@
 #include <volk.h>
 
 #include <VkBootstrap.h>
+#include <vk_mem_alloc.h>
 
 #include "core/Config.h"
 #include "core/Result.h"
@@ -27,6 +28,7 @@ public:
     VkSurfaceKHR surface() const { return surface_; }
     const vkb::Device& bootstrapDevice() const { return device_; }
     const std::string& deviceName() const { return deviceName_; }
+    VmaAllocator allocator() const { return allocator_; }
 
 private:
     VulkanContext() = default;
@@ -38,6 +40,7 @@ private:
     VkQueue graphicsQueue_ = VK_NULL_HANDLE;
     uint32_t graphicsQueueFamily_ = 0;
     std::string deviceName_;
+    VmaAllocator allocator_ = VK_NULL_HANDLE;
     bool owning_ = false;
 };
 

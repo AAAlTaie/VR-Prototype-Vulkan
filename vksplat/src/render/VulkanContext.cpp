@@ -53,9 +53,21 @@ core::Result<VulkanContext> VulkanContext::create(const platform::Window& window
     features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
     features13.dynamicRendering = VK_TRUE;
     features13.synchronization2 = VK_TRUE;
+    features13.shaderDemoteToHelperInvocation = VK_TRUE;
+
+    VkPhysicalDeviceVulkan12Features features12{};
+    features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    features12.bufferDeviceAddress = VK_TRUE;
+    features12.scalarBlockLayout = VK_TRUE;
+
+    VkPhysicalDeviceFeatures features{};
+    features.shaderInt64 = VK_TRUE;
 
     vkb::PhysicalDeviceSelector selector(context.instance_, context.surface_);
-    selector.set_minimum_version(1, 3).set_required_features_13(features13);
+    selector.set_minimum_version(1, 3)
+        .set_required_features_13(features13)
+        .set_required_features_12(features12)
+        .set_required_features(features);
     if (!config.preferredDevice.empty()) {
         selector.set_name(config.preferredDevice);
     }
@@ -83,6 +95,22 @@ core::Result<VulkanContext> VulkanContext::create(const platform::Window& window
     context.graphicsQueueFamily_ = familyResult.value();
     context.deviceName_ = physicalResult.value().name;
 
+    VmaVulkanFunctions functions{};
+    functions.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
+    functions.vkGetDeviceProcAddr = vkGetDeviceProcAddr;
+
+    VmaAllocatorCreateInfo allocatorInfo{};
+    allocatorInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+    allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_3;
+    allocatorInfo.instance = context.instance_.instance;
+    allocatorInfo.physicalDevice = physicalResult.value().physical_device;
+    allocatorInfo.device = context.device_.device;
+    allocatorInfo.pVulkanFunctions = &functions;
+
+    if (vmaCreateAllocator(&allocatorInfo, &context.allocator_) != VK_SUCCESS) {
+        return core::Error{"vmaCreateAllocator failed"};
+    }
+
     return core::Result<VulkanContext>(std::move(context));
 }
 
@@ -93,6 +121,7 @@ VulkanContext::VulkanContext(VulkanContext&& other) noexcept
       graphicsQueue_(std::exchange(other.graphicsQueue_, VK_NULL_HANDLE)),
       graphicsQueueFamily_(other.graphicsQueueFamily_),
       deviceName_(std::move(other.deviceName_)),
+      allocator_(std::exchange(other.allocator_, VK_NULL_HANDLE)),
       owning_(std::exchange(other.owning_, false)) {}
 
 VulkanContext& VulkanContext::operator=(VulkanContext&& other) noexcept {
@@ -104,6 +133,7 @@ VulkanContext& VulkanContext::operator=(VulkanContext&& other) noexcept {
         graphicsQueue_ = std::exchange(other.graphicsQueue_, VK_NULL_HANDLE);
         graphicsQueueFamily_ = other.graphicsQueueFamily_;
         deviceName_ = std::move(other.deviceName_);
+        allocator_ = std::exchange(other.allocator_, VK_NULL_HANDLE);
         owning_ = std::exchange(other.owning_, false);
     }
     return *this;
@@ -116,6 +146,10 @@ VulkanContext::~VulkanContext() {
 void VulkanContext::destroy() {
     if (!owning_) {
         return;
+    }
+    if (allocator_ != VK_NULL_HANDLE) {
+        vmaDestroyAllocator(allocator_);
+        allocator_ = VK_NULL_HANDLE;
     }
     if (device_.device != VK_NULL_HANDLE) {
         vkb::destroy_device(device_);

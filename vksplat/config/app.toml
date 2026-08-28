@@ -2,13 +2,22 @@
 width = 1600
 height = 900
 title = "vksplat"
-vsync = true
+vsync = false
 
 [renderer]
 validation = true
 preferred_device = ""
 frames_in_flight = 2
 clear_color = [0.02, 0.03, 0.05, 1.0]
+log_statistics = true
+
+[camera]
+field_of_view_degrees = 55.0
+near_plane = 0.01
+far_plane = 500.0
+orbit_degrees_per_second = 12.0
+elevation_degrees = 18.0
+distance_multiplier = 2.4
 
 [scene]
-path = ""
+path = "assets/test_galaxy.ply"

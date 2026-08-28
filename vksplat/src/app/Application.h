@@ -1,11 +1,16 @@
 #pragma once
 
+#include <chrono>
+
 #include "core/Config.h"
 #include "core/Result.h"
 #include "platform/Window.h"
+#include "render/GpuBuffer.h"
+#include "render/SplatPass.h"
 #include "render/Renderer.h"
 #include "render/Swapchain.h"
 #include "render/VulkanContext.h"
+#include "scene/OrbitCamera.h"
 
 namespace app {
 
@@ -22,12 +27,17 @@ public:
 
 private:
     Application(core::Config config, platform::Window window, render::VulkanContext context,
-                render::Swapchain swapchain, render::Renderer renderer)
+                render::Swapchain swapchain, render::Renderer renderer, render::GpuBuffer splats,
+                render::SplatPass pass, scene::OrbitCamera camera, uint32_t splatCount)
         : config_(std::move(config)),
           window_(std::move(window)),
           context_(std::move(context)),
           swapchain_(std::move(swapchain)),
-          renderer_(std::move(renderer)) {}
+          renderer_(std::move(renderer)),
+          splats_(std::move(splats)),
+          pass_(std::move(pass)),
+          camera_(std::move(camera)),
+          splatCount_(splatCount) {}
 
     core::Result<bool> recreateSwapchain();
 
@@ -36,6 +46,12 @@ private:
     render::VulkanContext context_;
     render::Swapchain swapchain_;
     render::Renderer renderer_;
+    render::GpuBuffer splats_;
+    render::SplatPass pass_;
+    scene::OrbitCamera camera_;
+    uint32_t splatCount_ = 0;
+    std::chrono::steady_clock::time_point lastReport_{};
+    uint32_t framesSinceReport_ = 0;
 };
 
 }

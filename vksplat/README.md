@@ -4,15 +4,15 @@ C++20 Vulkan 1.3 renderer for real-time 3D Gaussian splatting, with single-pass 
 
 ## Status
 
-In active development. Device, swapchain and frame loop are implemented; the splat pipeline is not yet.
+In active development. Loads 3DGS `.ply` scenes, projects each gaussian to a screen-space conic in a compute pass, and rasterises them with indirect draws. Depth sorting is not yet implemented, so blending order is arbitrary.
 
 | Phase | Scope | State |
 |---|---|---|
 | 0 | Build system, config, logging | Done |
 | 1 | Device, swapchain, frame loop | Done |
-| 2 | Splat asset pipeline | Next |
-| 3 | Projection and rasterisation | |
-| 4 | Depth sort and HDR composite | |
+| 2 | Splat asset pipeline | Done |
+| 3 | Projection and rasterisation | Done |
+| 4 | Depth sort and HDR composite | Next |
 | 5 | Single-pass stereo | |
 | 6 | OpenXR integration and profiling | |
 
@@ -34,6 +34,16 @@ cmake --build build --config Release
 ```
 
 All dependencies are fetched automatically. The config directory is staged next to the executable, so the binary runs from any working directory.
+
+## Test scene
+
+Real 3DGS scenes are hundreds of megabytes, so a generator is included:
+
+```
+python3 tools/make_test_scene.py assets/test_galaxy.ply --count 200000
+```
+
+`--sh-degree 0..3` controls how many spherical harmonic coefficients are written. Point `scene.path` in the config at any 3DGS `.ply`; trained scenes from the INRIA reference implementation load unmodified.
 
 ## Configuration
 
