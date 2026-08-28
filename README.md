@@ -97,7 +97,7 @@ Verified on Linux/GCC 13 against lavapipe under Xvfb, and on Windows/MSVC agains
 Buffers, images, shaders, pipelines, geometry. Phase 2 begins with the splat asset pipeline and introduces VMA.
 
 
-# Phase 2 — Splat Asset Pipeline
+# Phase 2 - Splat Asset Pipeline
 
 Parse 3D Gaussian Splatting `.ply` files, upload to device-local memory, and render every splat as a point. Confirms the asset data is correct before any projection maths is layered on top.
 
@@ -231,13 +231,13 @@ Linux/GCC 13 against lavapipe under Xvfb.
 Gaussian projection, conic evaluation, depth sorting, alpha compositing. Phase 3 replaces the point pipeline with screen-space conic rasterisation.
 
 
-# Phase 3 — Projection and Rasterisation
+# Phase 3 - Projection and Rasterisation
 
 Replace flat points with real Gaussian splatting. A compute pass projects each 3D gaussian into a screen-space conic, culls it, and appends survivors to a visible list. An indirect draw rasterises one quad per survivor, and the fragment shader evaluates the gaussian per pixel.
 
 This is the mathematical core of the technique.
 
-## Deliverables
+## Phase 3 - Deliverables
 
 | Component | Files | Responsibility |
 |---|---|---|
