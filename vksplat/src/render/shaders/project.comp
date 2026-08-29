@@ -16,6 +16,7 @@ layout(push_constant) uniform Constants {
     uint splatCount;
     float depthMinimum;
     float depthMaximum;
+    float extentSigma;
 } constants;
 
 mat3 rotationFromQuaternion(vec4 q) {
@@ -74,12 +75,10 @@ void main() {
         return;
     }
 
-    float middle = 0.5 * (a + c);
-    float largestEigenvalue = middle + sqrt(max(0.01, middle * middle - determinant));
-    float radius = 3.0 * sqrt(largestEigenvalue);
+    vec2 extent = constants.extentSigma * sqrt(vec2(a, c));
 
-    if (centre.x + radius < 0.0 || centre.x - radius > constants.viewport.x ||
-        centre.y + radius < 0.0 || centre.y - radius > constants.viewport.y) {
+    if (centre.x + extent.x < 0.0 || centre.x - extent.x > constants.viewport.x ||
+        centre.y + extent.y < 0.0 || centre.y - extent.y > constants.viewport.y) {
         return;
     }
 
@@ -87,8 +86,7 @@ void main() {
     uint slot = atomicAdd(constants.draw.instanceCount, 1);
 
     constants.projected.entries[slot].centre = centre;
-    constants.projected.entries[slot].radius = radius;
-    constants.projected.entries[slot].depth = camera.z;
+    constants.projected.entries[slot].extent = extent;
     constants.projected.entries[slot].conicOpacity =
         vec4(c * inverseDeterminant, -b * inverseDeterminant, a * inverseDeterminant, splat.opacity);
     constants.projected.entries[slot].colour = vec4(splat.colour, 0.0);

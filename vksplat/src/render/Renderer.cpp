@@ -98,6 +98,11 @@ core::Result<Renderer> Renderer::create(const VulkanContext& context, uint32_t f
         }
     }
 
+    auto profiler = GpuProfiler::create(context, framesInFlight, 16);
+    if (profiler) {
+        renderer.profiler_ = profiler.take();
+    }
+
     return core::Result<Renderer>(std::move(renderer));
 }
 
@@ -145,6 +150,7 @@ core::Result<FrameStatus> Renderer::drawFrame(const Swapchain& swapchain,
         return core::Error{"vkAcquireNextImageKHR failed"};
     }
 
+    profiler_.collect(frameIndex_);
     vkResetFences(device_, 1, &frame.inFlight);
     vkResetCommandPool(device_, frame.commandPool, 0);
 
@@ -152,6 +158,7 @@ core::Result<FrameStatus> Renderer::drawFrame(const Swapchain& swapchain,
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(frame.commandBuffer, &beginInfo);
+    profiler_.beginFrame(frame.commandBuffer, frameIndex_);
     const VkExtent2D extent = swapchain.extent();
 
     if (beforePass) {
@@ -171,6 +178,7 @@ core::Result<FrameStatus> Renderer::drawFrame(const Swapchain& swapchain,
         scenePass(frame.commandBuffer, hdrExtent_);
     }
     vkCmdEndRendering(frame.commandBuffer);
+    profiler_.stamp(frame.commandBuffer, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, "raster");
 
     submitBarrier(frame.commandBuffer,
                   makeLayoutBarrier(hdrTarget_.handle(), viewCount_,
@@ -193,6 +201,7 @@ core::Result<FrameStatus> Renderer::drawFrame(const Swapchain& swapchain,
         compositePass(frame.commandBuffer, extent);
     }
     vkCmdEndRendering(frame.commandBuffer);
+    profiler_.stamp(frame.commandBuffer, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, "tonemap");
 
     submitBarrier(frame.commandBuffer,
                   makeLayoutBarrier(swapchain.image(imageIndex), 1,
@@ -265,6 +274,7 @@ Renderer::Renderer(Renderer&& other) noexcept
       frames_(std::move(other.frames_)),
       presentReady_(std::move(other.presentReady_)),
       hdrTarget_(std::move(other.hdrTarget_)),
+      profiler_(std::move(other.profiler_)),
       hdrExtent_(other.hdrExtent_),
       viewCount_(other.viewCount_),
       frameIndex_(other.frameIndex_) {
@@ -280,6 +290,7 @@ Renderer& Renderer::operator=(Renderer&& other) noexcept {
         frames_ = std::move(other.frames_);
         presentReady_ = std::move(other.presentReady_);
         hdrTarget_ = std::move(other.hdrTarget_);
+        profiler_ = std::move(other.profiler_);
         hdrExtent_ = other.hdrExtent_;
         viewCount_ = other.viewCount_;
         frameIndex_ = other.frameIndex_;

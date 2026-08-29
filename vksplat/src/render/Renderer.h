@@ -8,6 +8,7 @@
 
 #include "core/Result.h"
 #include "render/GpuImage.h"
+#include "render/GpuProfiler.h"
 #include "render/Swapchain.h"
 #include "render/VulkanContext.h"
 
@@ -32,6 +33,7 @@ public:
     VkImageView hdrView() const { return hdrTarget_.view(); }
     VkExtent2D hdrExtent() const { return hdrExtent_; }
     uint32_t viewCount() const { return viewCount_; }
+    GpuProfiler& profiler() { return profiler_; }
     using RecordFunction = std::function<void(VkCommandBuffer, VkExtent2D)>;
 
     core::Result<FrameStatus> drawFrame(const Swapchain& swapchain, const std::array<float, 4>& clearColor,
@@ -56,6 +58,7 @@ private:
     std::vector<FrameResources> frames_;
     std::vector<VkSemaphore> presentReady_;
     GpuImage hdrTarget_;
+    GpuProfiler profiler_;
     VkExtent2D hdrExtent_{};
     uint32_t viewCount_ = 1;
     uint32_t frameIndex_ = 0;

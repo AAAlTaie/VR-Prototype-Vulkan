@@ -98,13 +98,14 @@ WindowConfig parseWindow(const toml::table& root) {
 RendererConfig parseRenderer(const toml::table& root) {
     const toml::table& table = requireSection(root, "renderer");
     requireOnlyKeys(table, "[renderer]",
-                    {"validation", "preferred_device", "frames_in_flight", "clear_color", "log_statistics"});
+                    {"validation", "preferred_device", "frames_in_flight", "clear_color", "log_statistics", "splat_extent_sigma"});
     return {
         requireField<bool>(table, "[renderer]", "validation"),
         requireField<std::string>(table, "[renderer]", "preferred_device"),
         requirePositive(table, "[renderer]", "frames_in_flight", 3),
         requireNormalizedColor(table, "[renderer]", "clear_color"),
         requireField<bool>(table, "[renderer]", "log_statistics"),
+        requireFloat(table, "[renderer]", "splat_extent_sigma", 1.0f, 5.0f),
     };
 }
 

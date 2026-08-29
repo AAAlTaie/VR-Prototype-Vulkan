@@ -13,8 +13,7 @@ struct Splat {
 
 struct Projected {
     vec2 centre;
-    float radius;
-    float depth;
+    vec2 extent;
     vec4 conicOpacity;
     vec4 colour;
 };

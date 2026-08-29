@@ -10,6 +10,7 @@ preferred_device = ""
 frames_in_flight = 2
 clear_color = [0.02, 0.03, 0.05, 1.0]
 log_statistics = true
+splat_extent_sigma = 3.0
 resolution_scale = 1.5
 
 [stereo]

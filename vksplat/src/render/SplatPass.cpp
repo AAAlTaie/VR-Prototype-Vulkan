@@ -334,7 +334,7 @@ core::Result<SplatPass> SplatPass::create(const VulkanContext& context, VkFormat
 void SplatPass::recordProjection(VkCommandBuffer commandBuffer, const EyeResources& eye,
                                  const glm::mat4& view, glm::vec2 focal, glm::vec2 viewport,
                                  VkDeviceAddress splats, uint32_t splatCount, float depthMinimum,
-                                 float depthMaximum) const {
+                                 float depthMaximum, float extentSigma) const {
     const VkDrawIndirectCommand reset{4, 0, 0, 0};
     vkCmdUpdateBuffer(commandBuffer, eye.drawArguments.handle(), 0, sizeof(reset), &reset);
 
@@ -353,6 +353,7 @@ void SplatPass::recordProjection(VkCommandBuffer commandBuffer, const EyeResourc
     constants.splatCount = splatCount;
     constants.depthMinimum = depthMinimum;
     constants.depthMaximum = depthMaximum;
+    constants.extentSigma = extentSigma;
 
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, projection_.pipeline.get());
     vkCmdPushConstants(commandBuffer, projection_.layout.get(), VK_SHADER_STAGE_COMPUTE_BIT, 0,
@@ -411,13 +412,16 @@ void SplatPass::recordSort(VkCommandBuffer commandBuffer, const EyeResources& ey
     computeToCompute(commandBuffer);
 }
 
-void SplatPass::recordEye(VkCommandBuffer commandBuffer, uint32_t eye, const glm::mat4& view,
-                          glm::vec2 focal, glm::vec2 viewport, VkDeviceAddress splats,
-                          uint32_t splatCount, float depthMinimum, float depthMaximum) const {
-    const EyeResources& resources = eyes_[eye];
-    recordProjection(commandBuffer, resources, view, focal, viewport, splats, splatCount, depthMinimum,
-                     depthMaximum);
-    recordSort(commandBuffer, resources);
+void SplatPass::recordProjectionOnly(VkCommandBuffer commandBuffer, uint32_t eye, const glm::mat4& view,
+                                     glm::vec2 focal, glm::vec2 viewport, VkDeviceAddress splats,
+                                     uint32_t splatCount, float depthMinimum, float depthMaximum,
+                                     float extentSigma) const {
+    recordProjection(commandBuffer, eyes_[eye], view, focal, viewport, splats, splatCount, depthMinimum,
+                     depthMaximum, extentSigma);
+}
+
+void SplatPass::recordSortOnly(VkCommandBuffer commandBuffer, uint32_t eye) const {
+    recordSort(commandBuffer, eyes_[eye]);
 }
 
 void SplatPass::recordCombine(VkCommandBuffer commandBuffer) const {

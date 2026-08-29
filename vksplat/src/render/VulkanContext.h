@@ -26,6 +26,7 @@ public:
     VkQueue graphicsQueue() const { return graphicsQueue_; }
     uint32_t graphicsQueueFamily() const { return graphicsQueueFamily_; }
     VkSurfaceKHR surface() const { return surface_; }
+    VkPhysicalDevice physicalDevice() const { return device_.physical_device.physical_device; }
     const vkb::Device& bootstrapDevice() const { return device_; }
     const std::string& deviceName() const { return deviceName_; }
     VmaAllocator allocator() const { return allocator_; }

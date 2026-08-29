@@ -22,6 +22,7 @@ struct RendererConfig {
     uint32_t framesInFlight;
     std::array<float, 4> clearColor;
     bool logStatistics;
+    float splatExtentSigma;
 };
 
 struct StereoConfig {

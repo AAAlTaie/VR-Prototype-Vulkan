@@ -24,6 +24,7 @@ struct ProjectionConstants {
     uint32_t splatCount;
     float depthMinimum;
     float depthMaximum;
+    float extentSigma;
 };
 
 struct ClearConstants {
@@ -73,9 +74,11 @@ public:
     SplatPass(const SplatPass&) = delete;
     SplatPass& operator=(const SplatPass&) = delete;
 
-    void recordEye(VkCommandBuffer commandBuffer, uint32_t eye, const glm::mat4& view, glm::vec2 focal,
-                   glm::vec2 viewport, VkDeviceAddress splats, uint32_t splatCount, float depthMinimum,
-                   float depthMaximum) const;
+    void recordProjectionOnly(VkCommandBuffer commandBuffer, uint32_t eye, const glm::mat4& view,
+                              glm::vec2 focal, glm::vec2 viewport, VkDeviceAddress splats,
+                              uint32_t splatCount, float depthMinimum, float depthMaximum,
+                              float extentSigma) const;
+    void recordSortOnly(VkCommandBuffer commandBuffer, uint32_t eye) const;
     void recordCombine(VkCommandBuffer commandBuffer) const;
     void recordRaster(VkCommandBuffer commandBuffer, VkExtent2D extent) const;
 
@@ -102,7 +105,8 @@ private:
 
     void recordProjection(VkCommandBuffer commandBuffer, const EyeResources& eye, const glm::mat4& view,
                           glm::vec2 focal, glm::vec2 viewport, VkDeviceAddress splats,
-                          uint32_t splatCount, float depthMinimum, float depthMaximum) const;
+                          uint32_t splatCount, float depthMinimum, float depthMaximum,
+                          float extentSigma) const;
     void recordSort(VkCommandBuffer commandBuffer, const EyeResources& eye) const;
 
     VkDevice device_ = VK_NULL_HANDLE;

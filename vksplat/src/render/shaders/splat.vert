@@ -33,7 +33,7 @@ void main() {
     vec2 corner = vec2((gl_VertexIndex & 1) == 0 ? -1.0 : 1.0,
                        (gl_VertexIndex & 2) == 0 ? -1.0 : 1.0);
 
-    vec2 position = entry.centre + corner * entry.radius;
+    vec2 position = entry.centre + corner * entry.extent;
 
     splatCentre = entry.centre;
     conicOpacity = entry.conicOpacity;

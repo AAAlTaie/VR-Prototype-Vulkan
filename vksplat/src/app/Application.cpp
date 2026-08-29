@@ -4,6 +4,7 @@
 #include "platform/Paths.h"
 #include <algorithm>
 #include <cmath>
+#include <string>
 
 #include <glm/trigonometric.hpp>
 
@@ -130,13 +131,19 @@ core::Result<bool> Application::run() {
                 const float depthMinimum = std::max(camera_.nearPlane(), distance - sceneRadius_);
                 const float depthMaximum = distance + sceneRadius_;
 
+                render::GpuProfiler& profiler = renderer_.profiler();
                 for (uint32_t eye = 0; eye < renderer_.viewCount(); ++eye) {
                     const glm::mat4 eyeView = camera_.eyeView(eye, renderer_.viewCount(),
                                                               config_.stereo.interpupillaryDistance);
-                    pass_.recordEye(commandBuffer, eye, eyeView, glm::vec2{focalLength}, viewport,
-                                    splatAddress, splatCount_, depthMinimum, depthMaximum);
+                    pass_.recordProjectionOnly(commandBuffer, eye, eyeView, glm::vec2{focalLength},
+                                               viewport, splatAddress, splatCount_, depthMinimum,
+                                               depthMaximum, config_.renderer.splatExtentSigma);
+                    profiler.stamp(commandBuffer, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, "project");
+                    pass_.recordSortOnly(commandBuffer, eye);
+                    profiler.stamp(commandBuffer, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, "sort");
                 }
                 pass_.recordCombine(commandBuffer);
+                profiler.stamp(commandBuffer, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, "combine");
             },
             [this](VkCommandBuffer commandBuffer, VkExtent2D area) {
                 pass_.recordRaster(commandBuffer, area);
@@ -153,9 +160,18 @@ core::Result<bool> Application::run() {
         if (config_.renderer.logStatistics && now - lastReport_ >= std::chrono::seconds(1)) {
             const float seconds = std::chrono::duration<float>(now - lastReport_).count();
             const uint32_t visible = pass_.visibleSplats();
-            spdlog::info("{:.1f} fps | {} / {} splats visible ({:.1f}%)",
-                         static_cast<float>(framesSinceReport_) / seconds, visible, splatCount_,
-                         100.0f * static_cast<float>(visible) / static_cast<float>(splatCount_));
+            const float fps = static_cast<float>(framesSinceReport_) / seconds;
+
+            std::string breakdown;
+            for (const render::StageTiming& timing : renderer_.profiler().averages()) {
+                breakdown += fmt::format(" {} {:.2f}", timing.label, timing.milliseconds);
+            }
+            renderer_.profiler().resetAverages();
+
+            spdlog::info("{:.1f} fps ({:.2f} ms) | {} / {} visible ({:.1f}%) |{} ms", fps,
+                         1000.0f / fps, visible, splatCount_,
+                         100.0f * static_cast<float>(visible) / static_cast<float>(splatCount_),
+                         breakdown.empty() ? " no gpu timings" : breakdown);
             framesSinceReport_ = 0;
             lastReport_ = now;
         }

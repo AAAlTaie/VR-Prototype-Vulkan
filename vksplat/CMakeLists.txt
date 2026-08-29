@@ -20,6 +20,7 @@ add_executable(vksplat
     src/platform/Paths.cpp
     src/render/GpuBuffer.cpp
     src/render/GpuImage.cpp
+    src/render/GpuProfiler.cpp
     src/render/SplatPass.cpp
     src/render/TonemapPass.cpp
     src/render/Upload.cpp
